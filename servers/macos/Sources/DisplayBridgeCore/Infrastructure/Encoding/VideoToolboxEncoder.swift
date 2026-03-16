@@ -1,0 +1,298 @@
+import CoreMedia
+import Foundation
+import IOSurface
+import VideoToolbox
+
+public enum VideoEncoderError: Error, Sendable {
+    case sessionCreationFailed(OSStatus)
+    case encodingFailed(OSStatus)
+    case noDataReturned
+    case notConfigured
+}
+
+/// Context passed through the VTCompressionSession output callback.
+/// Uses a closure + semaphore for synchronous (zero-overhead) encoding.
+private final class EncoderOutputContext {
+    let completion: (Result<EncodedFrame, Error>) -> Void
+    let sequenceNumber: UInt64
+
+    init(completion: @escaping (Result<EncodedFrame, Error>) -> Void, sequenceNumber: UInt64) {
+        self.completion = completion
+        self.sequenceNumber = sequenceNumber
+    }
+}
+
+public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
+    private var compressionSession: VTCompressionSession?
+    private var sequenceCounter: UInt64 = 0
+    private var isConfigured = false
+    private var currentWidth: Int = 0
+    private var currentHeight: Int = 0
+    private let lock = NSLock()
+
+    public init() {}
+
+    /// Sets up the compression session with the given configuration.
+    /// Skips re-creation if already configured for the same resolution.
+    public func setup(config: DeviceConfig) throws {
+        lock.lock()
+
+        if isConfigured && currentWidth == config.width && currentHeight == config.height {
+            lock.unlock()
+            return
+        }
+
+        defer { lock.unlock() }
+
+        teardownSession()
+
+        let codec: CMVideoCodecType
+        switch config.codec {
+        case .hevc:
+            codec = kCMVideoCodecType_HEVC
+        case .h264:
+            codec = kCMVideoCodecType_H264
+        }
+
+        var session: VTCompressionSession?
+
+        // VTCompressionSession output callback — delivers encoded data via closure
+        let outputCallback: VTCompressionOutputCallback = { _, sourceFrameRefCon, status, infoFlags, sampleBuffer in
+            guard let sourceFrameRefCon = sourceFrameRefCon else { return }
+            let context = Unmanaged<EncoderOutputContext>.fromOpaque(sourceFrameRefCon).takeRetainedValue()
+
+            if status != noErr {
+                context.completion(.failure(VideoEncoderError.encodingFailed(status)))
+                return
+            }
+
+            guard let sampleBuffer = sampleBuffer else {
+                context.completion(.failure(VideoEncoderError.noDataReturned))
+                return
+            }
+
+            // Check if this is a key frame
+            let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
+            var isKeyFrame = true
+            if let attachments = attachments, CFArrayGetCount(attachments) > 0 {
+                let dict = unsafeBitCast(
+                    CFArrayGetValueAtIndex(attachments, 0),
+                    to: CFDictionary.self
+                )
+                if let notSync = CFDictionaryGetValue(dict,
+                    unsafeBitCast(kCMSampleAttachmentKey_NotSync, to: UnsafeRawPointer.self)) {
+                    isKeyFrame = !(unsafeBitCast(notSync, to: CFBoolean.self) == kCFBooleanTrue)
+                }
+            }
+
+            // Extract the encoded data
+            guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
+                context.completion(.failure(VideoEncoderError.noDataReturned))
+                return
+            }
+
+            var totalLength: Int = 0
+            var dataPointer: UnsafeMutablePointer<Int8>?
+            let dataStatus = CMBlockBufferGetDataPointer(
+                dataBuffer,
+                atOffset: 0,
+                lengthAtOffsetOut: nil,
+                totalLengthOut: &totalLength,
+                dataPointerOut: &dataPointer
+            )
+
+            guard dataStatus == kCMBlockBufferNoErr, let dataPointer = dataPointer else {
+                context.completion(.failure(VideoEncoderError.noDataReturned))
+                return
+            }
+
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+
+            // Convert HVCC (length-prefixed) to Annex B (start-code-prefixed) format
+            var annexBData = Data(capacity: totalLength + 128)
+            let startCode: UInt32 = 0x01000000 // 00 00 00 01 in memory
+
+            // For keyframes, extract and prepend VPS/SPS/PPS parameter sets
+            if isKeyFrame, let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
+                var paramSetCount: Int = 0
+                CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+                    formatDesc, parameterSetIndex: 0,
+                    parameterSetPointerOut: nil, parameterSetSizeOut: nil,
+                    parameterSetCountOut: &paramSetCount, nalUnitHeaderLengthOut: nil
+                )
+
+                for i in 0..<paramSetCount {
+                    var paramPointer: UnsafePointer<UInt8>?
+                    var paramSize: Int = 0
+                    let paramStatus = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+                        formatDesc, parameterSetIndex: i,
+                        parameterSetPointerOut: &paramPointer,
+                        parameterSetSizeOut: &paramSize,
+                        parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil
+                    )
+                    if paramStatus == noErr, let pointer = paramPointer {
+                        withUnsafeBytes(of: startCode) { annexBData.append(contentsOf: $0) }
+                        annexBData.append(pointer, count: paramSize)
+                    }
+                }
+            }
+
+            // Convert each HVCC NAL unit: replace 4-byte length prefix with start code
+            let raw = UnsafeRawPointer(dataPointer)
+            var offset = 0
+            while offset + 4 <= totalLength {
+                let nalLength = Int(raw.loadUnaligned(fromByteOffset: offset, as: UInt32.self).bigEndian)
+                offset += 4
+                guard offset + nalLength <= totalLength else { break }
+                withUnsafeBytes(of: startCode) { annexBData.append(contentsOf: $0) }
+                annexBData.append(UnsafeBufferPointer(
+                    start: raw.advanced(by: offset).assumingMemoryBound(to: UInt8.self),
+                    count: nalLength
+                ))
+                offset += nalLength
+            }
+
+            let encodedFrame = EncodedFrame(
+                timestamp: pts,
+                data: annexBData,
+                isKeyFrame: isKeyFrame,
+                sequenceNumber: context.sequenceNumber
+            )
+
+            context.completion(.success(encodedFrame))
+        }
+
+        let status = VTCompressionSessionCreate(
+            allocator: kCFAllocatorDefault,
+            width: Int32(config.width),
+            height: Int32(config.height),
+            codecType: codec,
+            encoderSpecification: [
+                kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: true
+            ] as CFDictionary,
+            imageBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey: config.width,
+                kCVPixelBufferHeightKey: config.height,
+                kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary,
+            ] as CFDictionary,
+            compressedDataAllocator: nil,
+            outputCallback: outputCallback,
+            refcon: nil,
+            compressionSessionOut: &session
+        )
+
+        guard status == noErr, let session = session else {
+            throw VideoEncoderError.sessionCreationFailed(status)
+        }
+
+        // Configure session properties for ultra-low-latency encoding
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: 50_000_000 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 60 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 2.0 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: config.refreshRate as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel,
+                           value: kVTProfileLevel_HEVC_Main_AutoLevel)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality, value: kCFBooleanTrue)
+        let dataRateLimits: [Int] = [6_250_000, 1] // 50 Mbps cap
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits as CFArray)
+
+        VTCompressionSessionPrepareToEncodeFrames(session)
+
+        self.compressionSession = session
+        self.isConfigured = true
+        self.currentWidth = config.width
+        self.currentHeight = config.height
+    }
+
+    /// Synchronous encode — blocks the calling thread until hardware encoder finishes.
+    /// This is the fast path for real-time video: no Task scheduling, no async overhead.
+    /// Call from a dedicated thread (e.g., ScreenCaptureKit's streamQueue).
+    public func encodeSync(_ frame: VideoFrame) throws -> EncodedFrame {
+        lock.lock()
+        guard let session = compressionSession, isConfigured else {
+            lock.unlock()
+            throw VideoEncoderError.notConfigured
+        }
+        let seq = sequenceCounter
+        sequenceCounter += 1
+        lock.unlock()
+
+        // Create a pixel buffer backed by the IOSurface for zero-copy
+        var unmanagedPixelBuffer: Unmanaged<CVPixelBuffer>?
+        let cvStatus = CVPixelBufferCreateWithIOSurface(
+            kCFAllocatorDefault,
+            frame.surface,
+            [
+                kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA
+            ] as CFDictionary,
+            &unmanagedPixelBuffer
+        )
+
+        guard cvStatus == kCVReturnSuccess, let unmanagedPB = unmanagedPixelBuffer else {
+            throw VideoEncoderError.encodingFailed(cvStatus)
+        }
+        let pixelBuffer = unmanagedPB.takeRetainedValue()
+
+        let sem = DispatchSemaphore(value: 0)
+        var encodeResult: Result<EncodedFrame, Error>?
+
+        let context = EncoderOutputContext(
+            completion: { result in
+                encodeResult = result
+                sem.signal()
+            },
+            sequenceNumber: seq
+        )
+        let refcon = Unmanaged.passRetained(context).toOpaque()
+
+        VTCompressionSessionEncodeFrame(
+            session,
+            imageBuffer: pixelBuffer,
+            presentationTimeStamp: frame.timestamp,
+            duration: .invalid,
+            frameProperties: nil,
+            sourceFrameRefcon: refcon,
+            infoFlagsOut: nil
+        )
+
+        sem.wait()
+
+        guard let result = encodeResult else {
+            throw VideoEncoderError.noDataReturned
+        }
+        return try result.get()
+    }
+
+    public func encode(_ frame: VideoFrame) async throws -> EncodedFrame {
+        return try encodeSync(frame)
+    }
+
+    public func flush() async {
+        lock.lock()
+        guard let session = compressionSession else {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+
+        VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: .invalid)
+    }
+
+    private func teardownSession() {
+        if let session = compressionSession {
+            VTCompressionSessionInvalidate(session)
+            compressionSession = nil
+        }
+        isConfigured = false
+        sequenceCounter = 0
+        currentWidth = 0
+        currentHeight = 0
+    }
+
+    deinit {
+        teardownSession()
+    }
+}
