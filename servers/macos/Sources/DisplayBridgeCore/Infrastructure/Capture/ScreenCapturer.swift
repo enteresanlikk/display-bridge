@@ -35,20 +35,24 @@ public final class ScreenCapturer: NSObject, DisplayCapturing, SCStreamOutput, @
     }
 
     /// Pre-scans displays and caches the display reference.
-    /// This eliminates the async display scan at capture start time.
+    /// Retries a few times for newly created virtual displays to appear.
     public func preStart(config: DeviceConfig) async throws {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        // Virtual displays may take a moment to appear in SCShareableContent.
+        // Retry up to 5 times (total ~1s) before giving up.
+        for attempt in 1...5 {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
 
-        guard let display = content.displays.first(where: { $0.displayID == virtualDisplayID })
-                ?? content.displays.first else {
-            throw ScreenCapturerError.displayNotFound(virtualDisplayID)
-        }
-        cachedDisplay = display
+            if let display = content.displays.first(where: { $0.displayID == virtualDisplayID }) {
+                cachedDisplay = display
+                print("[ScreenCapturer] Display found: \(display.displayID) (\(display.width)x\(display.height))")
+                return
+            }
 
-        if display.displayID != virtualDisplayID {
-            print("[ScreenCapturer] Warning: Virtual display \(virtualDisplayID) not found in \(content.displays.map { $0.displayID }). Using display \(display.displayID) instead.")
+            print("[ScreenCapturer] Virtual display \(virtualDisplayID) not yet visible (attempt \(attempt)/5, available: \(content.displays.map { $0.displayID }))")
+            try await Task.sleep(nanoseconds: 200_000_000)
         }
-        print("[ScreenCapturer] Display found: \(display.displayID) (\(display.width)x\(display.height))")
+
+        throw ScreenCapturerError.displayNotFound(virtualDisplayID)
     }
 
     public func startCapture(
@@ -72,8 +76,7 @@ public final class ScreenCapturer: NSObject, DisplayCapturing, SCStreamOutput, @
             display = cached
         } else {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-            guard let found = content.displays.first(where: { $0.displayID == virtualDisplayID })
-                    ?? content.displays.first else {
+            guard let found = content.displays.first(where: { $0.displayID == virtualDisplayID }) else {
                 throw ScreenCapturerError.displayNotFound(virtualDisplayID)
             }
             display = found
