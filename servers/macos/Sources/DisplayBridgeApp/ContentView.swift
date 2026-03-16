@@ -5,7 +5,8 @@ struct ContentView: View {
     @EnvironmentObject var serverManager: ServerManager
 
     @State private var editablePort: String = "7878"
-    @State private var localIP: String = localIPAddress() ?? "—"
+    @State private var localAddresses: [NetworkAddress] = allNetworkAddresses()
+    @State private var pathMonitor: NWPathMonitor?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -57,26 +58,27 @@ struct ContentView: View {
                     }
 
                     if serverManager.isRunning {
-                        HStack {
-                            Image(systemName: "network")
-                                .foregroundStyle(.green)
-                            Text("Network:")
-                                .foregroundStyle(.secondary)
-                            Text("\(localIP):\(String(serverManager.port))")
-                                .font(.body.monospaced())
-                                .textSelection(.enabled)
-                            Spacer()
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString("\(localIP)", forType: .string)
-                            } label: {
-                                Image(systemName: "doc.on.doc")
+                        ForEach(localAddresses) { addr in
+                            HStack {
+                                Image(systemName: "network")
+                                    .foregroundStyle(.green)
+                                Text("\(addr.name):")
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 40, alignment: .leading)
+                                Text("\(addr.ip):\(String(serverManager.port))")
+                                    .font(.body.monospaced())
+                                    .textSelection(.enabled)
+                                Spacer()
+                                Button {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(addr.ip, forType: .string)
+                                } label: {
+                                    Image(systemName: "doc.on.doc")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Copy IP")
                             }
-                            .buttonStyle(.borderless)
-                            .help("Copy IP")
                         }
-
-
                     }
                 }
                 .padding(.vertical, 4)
@@ -141,16 +143,38 @@ struct ContentView: View {
         }
         .onAppear {
             editablePort = String(serverManager.port)
-            localIP = localIPAddress() ?? "—"
+            localAddresses = allNetworkAddresses()
+            startNetworkMonitor()
         }
+        .onDisappear {
+            pathMonitor?.cancel()
+            pathMonitor = nil
+        }
+    }
+
+    private func startNetworkMonitor() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { _ in
+            DispatchQueue.main.async {
+                localAddresses = allNetworkAddresses()
+            }
+        }
+        monitor.start(queue: DispatchQueue.global(qos: .utility))
+        pathMonitor = monitor
     }
 }
 
-/// Returns the local network IP address (en0).
-private func localIPAddress() -> String? {
-    var address: String?
+struct NetworkAddress: Identifiable {
+    let name: String
+    let ip: String
+    var id: String { "\(name)-\(ip)" }
+}
+
+/// Returns all local IPv4 network addresses (excluding loopback).
+private func allNetworkAddresses() -> [NetworkAddress] {
+    var results: [NetworkAddress] = []
     var ifaddr: UnsafeMutablePointer<ifaddrs>?
-    guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return nil }
+    guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return [] }
     defer { freeifaddrs(ifaddr) }
 
     for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
@@ -159,7 +183,7 @@ private func localIPAddress() -> String? {
         guard addrFamily == UInt8(AF_INET) else { continue }
 
         let name = String(cString: interface.ifa_name)
-        guard name == "en0" || name == "en1" else { continue }
+        guard name != "lo0" else { continue }
 
         var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
         getnameinfo(
@@ -167,8 +191,8 @@ private func localIPAddress() -> String? {
             &hostname, socklen_t(hostname.count),
             nil, 0, NI_NUMERICHOST
         )
-        address = String(cString: hostname)
-        if name == "en0" { break }
+        let ip = String(cString: hostname)
+        results.append(NetworkAddress(name: name, ip: ip))
     }
-    return address
+    return results
 }
