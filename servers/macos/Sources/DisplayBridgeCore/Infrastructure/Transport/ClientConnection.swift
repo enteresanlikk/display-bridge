@@ -137,10 +137,10 @@ public final class ClientConnection: @unchecked Sendable, DataTransporting {
     }
 
     public func disconnect() async {
-        lock.lock()
-        receiveContinuation?.finish()
-        receiveContinuation = nil
-        lock.unlock()
+        lock.withLock {
+            receiveContinuation?.finish()
+            receiveContinuation = nil
+        }
 
         connection.cancel()
     }

@@ -37,12 +37,9 @@ public final class USBTransport: @unchecked Sendable, DataTransporting {
 
     /// Starts listening and waits for a client to connect.
     public func connect() async throws {
-        lock.lock()
-        guard listener == nil else {
-            lock.unlock()
+        if lock.withLock({ listener != nil }) {
             throw USBTransportError.alreadyListening
         }
-        lock.unlock()
 
         let tcpOptions = NWProtocolTCP.Options()
         tcpOptions.noDelay = true // Disable Nagle's algorithm for low latency
@@ -108,12 +105,9 @@ public final class USBTransport: @unchecked Sendable, DataTransporting {
     }
 
     public func send(_ data: Data) async throws {
-        lock.lock()
-        guard let connection = connection else {
-            lock.unlock()
+        guard let connection = lock.withLock({ connection }) else {
             throw USBTransportError.notConnected
         }
-        lock.unlock()
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             connection.send(content: data, completion: .contentProcessed { error in
@@ -216,14 +210,15 @@ public final class USBTransport: @unchecked Sendable, DataTransporting {
     }
 
     public func disconnect() async {
-        lock.lock()
-        let conn = connection
-        let lstn = listener
-        connection = nil
-        listener = nil
-        receiveContinuation?.finish()
-        receiveContinuation = nil
-        lock.unlock()
+        let (conn, lstn) = lock.withLock {
+            let c = connection
+            let l = listener
+            connection = nil
+            listener = nil
+            receiveContinuation?.finish()
+            receiveContinuation = nil
+            return (c, l)
+        }
 
         conn?.cancel()
         lstn?.cancel()

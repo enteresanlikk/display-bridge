@@ -1,6 +1,29 @@
 import CoreGraphics
 import Foundation
 
+/// Thread-safe boolean flag for use in @Sendable closures.
+private final class AtomicFlag: @unchecked Sendable {
+    private var _lock = os_unfair_lock()
+    private var _value: Bool
+
+    init(_ value: Bool = false) {
+        _value = value
+    }
+
+    var value: Bool {
+        get {
+            os_unfair_lock_lock(&_lock)
+            defer { os_unfair_lock_unlock(&_lock) }
+            return _value
+        }
+        set {
+            os_unfair_lock_lock(&_lock)
+            _value = newValue
+            os_unfair_lock_unlock(&_lock)
+        }
+    }
+}
+
 // MARK: - Active Client Tracking
 
 /// Tracks active per-client pipelines for graceful shutdown.
@@ -100,28 +123,25 @@ public final class ServerEngine: @unchecked Sendable {
     /// Starts the server: begins TCP listener and accepting clients.
     /// Waits until the TCP listener is actually ready before reporting success.
     public func start(defaultConfig: DeviceConfig) async {
-        lock.lock()
-        guard !isRunning else {
-            lock.unlock()
-            return
+        let alreadyRunning = lock.withLock {
+            guard !isRunning else { return true }
+            isRunning = true
+            return false
         }
-        isRunning = true
-        lock.unlock()
+        guard !alreadyRunning else { return }
 
         let connListener = ConnectionListener(port: port)
 
         // Wait for the NWListener to actually bind and become ready
         let listenerReady: Bool = await withCheckedContinuation { continuation in
-            var resumed = false
+            let resumed = AtomicFlag()
             connListener.onListenerReady = { ready in
-                guard !resumed else { return }
-                resumed = true
+                guard !resumed.value else { return }
+                resumed.value = true
                 continuation.resume(returning: ready)
             }
 
-            lock.lock()
-            listener = connListener
-            lock.unlock()
+            lock.withLock { listener = connListener }
 
             let connectionStream = connListener.start()
 
@@ -145,10 +165,10 @@ public final class ServerEngine: @unchecked Sendable {
             print("[ServerEngine] Server started on port \(port) (TCP)")
         } else {
             // Listener failed — clean up
-            lock.lock()
-            isRunning = false
-            listener = nil
-            lock.unlock()
+            lock.withLock {
+                isRunning = false
+                listener = nil
+            }
             listenTask?.cancel()
             listenTask = nil
             onStateChanged?(false)
@@ -165,7 +185,7 @@ public final class ServerEngine: @unchecked Sendable {
         let vdm = VirtualDisplayManager()
         let capturer = ScreenCapturer(virtualDisplayID: CGMainDisplayID())
         let encoder = VideoToolboxEncoder()
-        var pipelineReady = false
+        let pipelineReady = AtomicFlag()
 
         let coordinator = SessionCoordinator(
             capturer: capturer,
@@ -177,7 +197,7 @@ public final class ServerEngine: @unchecked Sendable {
                 await capturer.stopCapture()
 
                 let newID: CGDirectDisplayID
-                if !pipelineReady {
+                if !pipelineReady.value {
                     do {
                         newID = try vdm.create(config: clientConfig, deviceName: deviceName)
                     } catch {
@@ -185,7 +205,7 @@ public final class ServerEngine: @unchecked Sendable {
                         newID = CGMainDisplayID()
                     }
                     print("[Client \(shortID)] Virtual display created: \(deviceName) (ID: \(newID))")
-                    pipelineReady = true
+                    pipelineReady.value = true
 
                     self?.activeClients.updateDeviceName(clientID, name: deviceName)
                     self?.onClientConnected?(clientID, deviceName)
@@ -225,10 +245,11 @@ public final class ServerEngine: @unchecked Sendable {
 
     /// Stops the server: cancels the listener and cleans up all clients.
     public func stop() async {
-        lock.lock()
-        let lstn = listener
-        listener = nil
-        lock.unlock()
+        let lstn = lock.withLock {
+            let l = listener
+            listener = nil
+            return l
+        }
 
         lstn?.stop()
         listenTask?.cancel()
@@ -237,9 +258,7 @@ public final class ServerEngine: @unchecked Sendable {
         // stopAll cancels per-client tasks, stops coordinators, and destroys VDMs
         await activeClients.stopAll()
 
-        lock.lock()
-        isRunning = false
-        lock.unlock()
+        lock.withLock { isRunning = false }
 
         onStateChanged?(false)
     }

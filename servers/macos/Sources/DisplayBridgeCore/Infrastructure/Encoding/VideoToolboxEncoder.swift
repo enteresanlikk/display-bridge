@@ -271,12 +271,9 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
     }
 
     public func flush() async {
-        lock.lock()
-        guard let session = compressionSession else {
-            lock.unlock()
+        guard let session = lock.withLock({ compressionSession }) else {
             return
         }
-        lock.unlock()
 
         VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: .invalid)
     }

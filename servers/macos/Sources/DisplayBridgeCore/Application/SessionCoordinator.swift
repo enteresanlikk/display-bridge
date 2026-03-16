@@ -61,6 +61,85 @@ private final class PipelineGate: @unchecked Sendable {
     }
 }
 
+/// Tracks per-frame timing and computes periodic FPS / latency stats.
+private final class PipelineMetrics: @unchecked Sendable {
+    struct Stats {
+        let captureFPS: Double
+        let sentFPS: Double
+        let droppedPercent: Double
+        let avgLatencyMs: Double
+        let maxLatencyMs: Double
+        let intervalSec: Double
+    }
+
+    private var _lock = os_unfair_lock()
+
+    private var _captureCount: UInt64 = 0
+    private var _sentCount: UInt64 = 0
+    private var _totalLatencyUs: UInt64 = 0
+    private var _maxLatencyUs: UInt64 = 0
+
+    private var _lastSnapshotNs: UInt64 = DispatchTime.now().uptimeNanoseconds
+    private var _lastCaptureCount: UInt64 = 0
+    private var _lastSentCount: UInt64 = 0
+    private var _lastTotalLatencyUs: UInt64 = 0
+    private var _lastMaxLatencyUs: UInt64 = 0
+
+    func recordCapture() {
+        os_unfair_lock_lock(&_lock)
+        _captureCount += 1
+        os_unfair_lock_unlock(&_lock)
+    }
+
+    func recordSent(latencyUs: UInt64) {
+        os_unfair_lock_lock(&_lock)
+        _sentCount += 1
+        _totalLatencyUs += latencyUs
+        if latencyUs > _maxLatencyUs {
+            _maxLatencyUs = latencyUs
+        }
+        os_unfair_lock_unlock(&_lock)
+    }
+
+    func snapshot() -> Stats {
+        os_unfair_lock_lock(&_lock)
+        let now = DispatchTime.now().uptimeNanoseconds
+        let deltaNs = now - _lastSnapshotNs
+        let deltaCapture = _captureCount - _lastCaptureCount
+        let deltaSent = _sentCount - _lastSentCount
+        let deltaLatency = _totalLatencyUs - _lastTotalLatencyUs
+        let maxLat = _maxLatencyUs
+
+        _lastSnapshotNs = now
+        _lastCaptureCount = _captureCount
+        _lastSentCount = _sentCount
+        _lastTotalLatencyUs = _totalLatencyUs
+        _lastMaxLatencyUs = _maxLatencyUs
+        _maxLatencyUs = 0
+        os_unfair_lock_unlock(&_lock)
+
+        let intervalSec = Double(deltaNs) / 1_000_000_000.0
+        guard intervalSec > 0 else {
+            return Stats(captureFPS: 0, sentFPS: 0, droppedPercent: 0,
+                         avgLatencyMs: 0, maxLatencyMs: 0, intervalSec: 0)
+        }
+
+        let capFPS = Double(deltaCapture) / intervalSec
+        let sentFPS = Double(deltaSent) / intervalSec
+        let dropPct = deltaCapture > 0
+            ? Double(deltaCapture - deltaSent) / Double(deltaCapture) * 100.0
+            : 0.0
+        let avgMs = deltaSent > 0
+            ? Double(deltaLatency) / Double(deltaSent) / 1000.0
+            : 0.0
+        let maxMs = Double(maxLat) / 1000.0
+
+        return Stats(captureFPS: capFPS, sentFPS: sentFPS,
+                     droppedPercent: dropPct, avgLatencyMs: avgMs,
+                     maxLatencyMs: maxMs, intervalSec: intervalSec)
+    }
+}
+
 public actor SessionCoordinator {
     /// Called when the client handshake or config update arrives with its DeviceConfig.
     /// The handler should recreate VDM/encoder/capturer to match the client's resolution.
@@ -76,6 +155,7 @@ public actor SessionCoordinator {
     private var inputListenerTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
     private var lastReceivedTime: UInt64 = 0
+    private var metrics: PipelineMetrics?
 
     public init(
         capturer: any DisplayCapturing,
@@ -237,47 +317,21 @@ public actor SessionCoordinator {
         let trans = self.transport
 
         let gate = PipelineGate()
-        let frameCount = AtomicCounter()
-        let logInterval: UInt64 = 60
+        let metrics = PipelineMetrics()
+        self.metrics = metrics
 
         try await capturer.startCapture(config: config) { frame in
+            metrics.recordCapture()
             guard gate.tryEnter() else { return }
 
-            let pipelineStartNs = DispatchTime.now().uptimeNanoseconds
-            let captureAgeUs = (pipelineStartNs - frame.captureTimeNs) / 1000
-
             do {
-                let encodeStartNs = DispatchTime.now().uptimeNanoseconds
                 let encoded = try enc.encodeSync(frame)
-                let encodeEndNs = DispatchTime.now().uptimeNanoseconds
-                let encodeUs = (encodeEndNs - encodeStartNs) / 1000
-
-                let packetStartNs = DispatchTime.now().uptimeNanoseconds
                 let packet = PacketFramer.wrapVideoFrame(encoded)
-                let packetUs = (DispatchTime.now().uptimeNanoseconds - packetStartNs) / 1000
-
-                let sendStartNs = DispatchTime.now().uptimeNanoseconds
-                let frameSize = packet.count
-                let isKey = encoded.isKeyFrame
-                let fc = frameCount.add(1)
-
-                print("[PIPE] Encoded #\(fc) \(isKey ? "KEY" : "P") \(frameSize)B enc=\(encodeUs)µs — sending via USB...")
 
                 trans.sendTracked(packet) {
-                    let sendEndNs = DispatchTime.now().uptimeNanoseconds
-                    let sendUs = (sendEndNs - sendStartNs) / 1000
-                    let totalUs = (sendEndNs - frame.captureTimeNs) / 1000
+                    let totalUs = (DispatchTime.now().uptimeNanoseconds - frame.captureTimeNs) / 1000
                     gate.leave()
-
-                    if fc % logInterval == 1 || isKey {
-                        let stats = gate.stats
-                        print("""
-                        [PIPE #\(fc)] \(isKey ? "KEY" : "P") \(frameSize)B | \
-                        captAge=\(captureAgeUs)µs enc=\(encodeUs)µs pkt=\(packetUs)µs \
-                        send=\(sendUs)µs TOTAL=\(totalUs)µs (\(totalUs/1000)ms) | \
-                        drop=\(stats.dropped)/\(stats.total)
-                        """)
-                    }
+                    metrics.recordSent(latencyUs: totalUs)
                 }
             } catch {
                 gate.leave()
@@ -291,6 +345,7 @@ public actor SessionCoordinator {
     private func startHeartbeat() {
         lastReceivedTime = DispatchTime.now().uptimeNanoseconds
         let transport = self.transport
+        let metrics = self.metrics
 
         heartbeatTask = Task { [weak self] in
             let pingInterval: UInt64 = 3_000_000_000   // 3 seconds
@@ -299,6 +354,12 @@ public actor SessionCoordinator {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: pingInterval)
                 guard !Task.isCancelled else { break }
+
+                // Pipeline stats
+                if let s = metrics?.snapshot() {
+                    print(String(format: "[STATS] capture=%.0ffps sent=%.0ffps | drop=%.0f%% | latency avg=%.1fms max=%.1fms",
+                                 s.captureFPS, s.sentFPS, s.droppedPercent, s.avgLatencyMs, s.maxLatencyMs))
+                }
 
                 // Send PING
                 let seq = await self?.nextSequenceNumber() ?? 0
