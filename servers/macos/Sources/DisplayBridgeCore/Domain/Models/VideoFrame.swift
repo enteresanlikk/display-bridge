@@ -1,5 +1,5 @@
 import CoreMedia
-import IOSurface
+@preconcurrency import IOSurface
 
 public struct VideoFrame: Sendable {
     public let timestamp: CMTime

@@ -24,27 +24,31 @@ final class ServerManager: ObservableObject {
         let eng = ServerEngine(port: port)
 
         eng.onStateChanged = { [weak self] running in
+            guard let self else { return }
             Task { @MainActor in
-                self?.isRunning = running
+                self.isRunning = running
             }
         }
 
         eng.onClientConnected = { [weak self] clientID, deviceName in
+            guard let self else { return }
             Task { @MainActor in
                 let info = ClientInfo(id: clientID, deviceName: deviceName, connectedAt: Date())
-                self?.connectedClients.append(info)
+                self.connectedClients.append(info)
             }
         }
 
         eng.onClientDisconnected = { [weak self] clientID in
+            guard let self else { return }
             Task { @MainActor in
-                self?.connectedClients.removeAll { $0.id == clientID }
+                self.connectedClients.removeAll { $0.id == clientID }
             }
         }
 
         eng.onError = { [weak self] message in
+            guard let self else { return }
             Task { @MainActor in
-                self?.errorMessage = message
+                self.errorMessage = message
             }
         }
 
