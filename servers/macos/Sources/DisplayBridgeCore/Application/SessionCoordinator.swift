@@ -126,8 +126,8 @@ private final class PipelineMetrics: @unchecked Sendable {
 
         let capFPS = Double(deltaCapture) / intervalSec
         let sentFPS = Double(deltaSent) / intervalSec
-        let dropPct = deltaCapture > 0
-            ? Double(deltaCapture - deltaSent) / Double(deltaCapture) * 100.0
+        let dropPct = deltaCapture > deltaSent
+            ? Double(deltaCapture &- deltaSent) / Double(deltaCapture) * 100.0
             : 0.0
         let avgMs = deltaSent > 0
             ? Double(deltaLatency) / Double(deltaSent) / 1000.0
