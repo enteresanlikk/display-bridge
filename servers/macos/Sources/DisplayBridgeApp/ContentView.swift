@@ -58,9 +58,9 @@ struct ContentView: View {
 
                     if serverManager.isRunning {
                         HStack {
-                            Image(systemName: "wifi")
+                            Image(systemName: "network")
                                 .foregroundStyle(.green)
-                            Text("WiFi:")
+                            Text("Network:")
                                 .foregroundStyle(.secondary)
                             Text("\(localIP):\(String(serverManager.port))")
                                 .font(.body.monospaced())
@@ -146,7 +146,7 @@ struct ContentView: View {
     }
 }
 
-/// Returns the local WiFi IP address (en0).
+/// Returns the local network IP address (en0).
 private func localIPAddress() -> String? {
     var address: String?
     var ifaddr: UnsafeMutablePointer<ifaddrs>?

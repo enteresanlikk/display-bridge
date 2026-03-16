@@ -73,7 +73,7 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
             defaultHandler?.uncaughtException(thread, throwable)
         }
 
-        // Determine launch mode: USB Accessory vs WiFi/TCP
+        // Determine launch mode: USB Accessory vs Network/TCP
         val accessory = getUSBAccessory()
 
         if (accessory != null) {

@@ -174,9 +174,9 @@ class ConnectionActivity : AppCompatActivity() {
         overrideCheckbox.setOnCheckedChangeListener { _, _ -> updateResFields() }
         updateResFields()
 
-        // --- Connect Button (WiFi/TCP) ---
+        // --- Connect Button (Network/TCP) ---
         val connectBtn = Button(this).apply {
-            text = "CONNECT (WiFi)"
+            text = "CONNECT (Network)"
             setTextColor(Color.WHITE)
             textSize = 18f
             typeface = Typeface.DEFAULT_BOLD
