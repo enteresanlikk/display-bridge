@@ -48,12 +48,8 @@ struct MenuBarView: View {
             }
 
             Button("Open Window") {
-                // Dispatch async so the menu dismisses first,
-                // then activation policy change + window focus can take effect
-                DispatchQueue.main.async {
-                    if let delegate = NSApplication.shared.delegate as? AppDelegate {
-                        delegate.showWindow()
-                    }
+                if let delegate = NSApplication.shared.delegate as? AppDelegate {
+                    delegate.showWindow()
                 }
             }
 
