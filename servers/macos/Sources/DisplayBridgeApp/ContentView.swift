@@ -105,49 +105,39 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 60)
                 } else {
-                    Table(serverManager.connectedClients) {
-                        TableColumn("Device") { client in
-                            Text(client.deviceName)
-                        }
-                        TableColumn("Connected At") { client in
-                            Text(client.connectedAt, style: .time)
-                        }
-                        TableColumn("ID") { client in
-                            Text(client.id.uuidString.prefix(8))
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
+                    VStack(spacing: 0) {
+                        ForEach(serverManager.connectedClients) { client in
+                            HStack {
+                                Image(systemName: "iphone")
+                                    .foregroundStyle(.blue)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(client.deviceName)
+                                        .font(.body)
+                                    Text(client.connectedAt, style: .relative)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button(role: .destructive) {
+                                    Task {
+                                        await serverManager.disconnectClient(client.id)
+                                    }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.red)
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Disconnect")
+                            }
+                            .padding(.vertical, 4)
                         }
                     }
-                    .frame(minHeight: 100)
                 }
             }
             .padding(.horizontal)
             .padding(.top, 8)
 
             Spacer()
-
-            // Status Bar
-            HStack {
-                Image(systemName: "info.circle")
-                    .foregroundStyle(.secondary)
-                Text("Port \(String(serverManager.port))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if serverManager.isRunning {
-                    Text("·")
-                        .foregroundStyle(.secondary)
-                    Text(localIP)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text("\(serverManager.connectedClients.count) client(s)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            .background(.bar)
         }
         .onAppear {
             editablePort = String(serverManager.port)

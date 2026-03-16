@@ -65,6 +65,10 @@ final class ServerManager: ObservableObject {
         await eng.start(defaultConfig: config)
     }
 
+    func disconnectClient(_ id: UUID) async {
+        await engine?.disconnectClient(id)
+    }
+
     func stopServer() async {
         await engine?.stop()
         engine = nil

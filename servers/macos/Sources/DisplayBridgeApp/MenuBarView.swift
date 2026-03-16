@@ -15,27 +15,6 @@ struct MenuBarView: View {
 
             Divider()
 
-            // Connected clients
-            if serverManager.connectedClients.isEmpty {
-                Text("No clients connected")
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Connected Clients:")
-                    .font(.caption.bold())
-                ForEach(serverManager.connectedClients) { client in
-                    HStack {
-                        Image(systemName: "iphone")
-                        Text(client.deviceName)
-                        Spacer()
-                        Text(client.id.uuidString.prefix(8))
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            Divider()
-
             // Start/Stop
             Button(serverManager.isRunning ? "Stop Server" : "Start Server") {
                 Task {
@@ -44,12 +23,6 @@ struct MenuBarView: View {
                     } else {
                         await serverManager.startServer()
                     }
-                }
-            }
-
-            Button("Open Window") {
-                if let delegate = NSApplication.shared.delegate as? AppDelegate {
-                    delegate.showWindow()
                 }
             }
 

@@ -77,6 +77,17 @@ public final class ActiveClients: @unchecked Sendable {
         return clients.map { ($0.key, $0.value.deviceName) }
     }
 
+    public func disconnectClient(_ id: UUID) async {
+        let entry: ClientEntry? = lock.withLock {
+            clients.removeValue(forKey: id)
+        }
+        guard let entry else { return }
+        entry.task?.cancel()
+        await entry.coordinator.stopSession()
+        entry.vdm.destroy()
+        await entry.task?.value
+    }
+
     public func stopAll() async {
         let snap: [UUID: ClientEntry] = lock.withLock {
             let s = clients
@@ -123,6 +134,12 @@ public final class ServerEngine: @unchecked Sendable {
 
     public var clientCount: Int {
         activeClients.count
+    }
+
+    /// Disconnects a specific client by ID.
+    public func disconnectClient(_ id: UUID) async {
+        await activeClients.disconnectClient(id)
+        onClientDisconnected?(id)
     }
 
     /// Starts the server: begins TCP listener and accepting clients.
