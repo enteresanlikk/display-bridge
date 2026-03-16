@@ -17,9 +17,15 @@ jobs:
       - name: Build release
         run: cd servers/macos && swift build -c release
 
+      - name: Ad-hoc code sign
+        run: |
+          codesign --force --sign - servers/macos/.build/release/DisplayBridgeCLI
+          codesign --force --sign - servers/macos/.build/release/DisplayBridgeApp
+
       - name: Package artifacts
         run: |
           cd servers/macos/.build/release
+          xattr -cr DisplayBridgeCLI DisplayBridgeApp
           zip -j DisplayBridge-macOS.zip DisplayBridgeCLI DisplayBridgeApp
 
       - uses: actions/upload-artifact@v4
