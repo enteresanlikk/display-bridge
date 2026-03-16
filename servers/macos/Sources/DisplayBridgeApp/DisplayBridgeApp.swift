@@ -20,11 +20,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApplication.shared.setActivationPolicy(.regular)
+        // .accessory: no Terminal window, no Dock icon — lives in menu bar only.
+        // SPM executable targets don't produce .app bundles, so .regular
+        // would cause macOS to open a Terminal window as the "host app".
+        NSApplication.shared.setActivationPolicy(.accessory)
         showWindow()
     }
 
     func showWindow() {
+        NSApplication.shared.setActivationPolicy(.regular)
         if let window = window {
             window.makeKeyAndOrderFront(nil)
             NSApplication.shared.activate(ignoringOtherApps: true)
@@ -56,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
+        NSApplication.shared.setActivationPolicy(.accessory)
         return false
     }
 }

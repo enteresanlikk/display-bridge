@@ -129,7 +129,7 @@ class ClientSession(
                 // so the USB buffer stays drained while MediaCodec initializes
                 val s = surface
                 if (s != null) {
-                    decoder.configure(config.width, config.height, s)
+                    decoder.configure(config.width, config.height, s, config.codec)
                     decoderReady = true
                     Log.i(TAG, "Decoder configured and ready")
                 } else {

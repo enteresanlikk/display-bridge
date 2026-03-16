@@ -7,7 +7,8 @@ import android.view.Surface
 import java.util.concurrent.locks.ReentrantLock
 
 /**
- * Hardware-accelerated H.265 (HEVC) decoder using MediaCodec async callback mode.
+ * Hardware-accelerated video decoder using MediaCodec async callback mode.
+ * Supports both H.265 (HEVC) and H.264 (AVC) codecs.
  *
  * Uses async callbacks for zero-blocking decode:
  * - onInputBufferAvailable: immediately feeds the latest frame (drops stale ones)
@@ -19,16 +20,11 @@ class HardwareDecoder {
 
     companion object {
         private const val TAG = "HardwareDecoder"
-        private const val MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_HEVC
-
-        // HEVC NAL unit types for parameter sets
-        private const val NAL_TYPE_VPS = 32
-        private const val NAL_TYPE_SPS = 33
-        private const val NAL_TYPE_PPS = 34
     }
 
     private var codec: MediaCodec? = null
     private var isConfigured = false
+    private var isHevc = true
     private var csdSubmitted = false
     private var frameCount = 0L
     private var droppedCount = 0L
@@ -52,18 +48,20 @@ class HardwareDecoder {
     /**
      * Configures the decoder in async callback mode.
      */
-    fun configure(width: Int, height: Int, surface: Surface) {
+    fun configure(width: Int, height: Int, surface: Surface, codecName: String = "hevc") {
         if (isConfigured) {
             Log.w(TAG, "Already configured, releasing first")
             release()
         }
 
-        Log.i(TAG, "Configuring HEVC decoder (async): ${width}x${height}")
+        isHevc = codecName != "h264"
+        val mimeType = if (isHevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+        Log.i(TAG, "Configuring ${if (isHevc) "HEVC" else "H.264"} decoder (async): ${width}x${height}")
 
-        val format = MediaFormat.createVideoFormat(MIME_TYPE, width, height)
+        val format = MediaFormat.createVideoFormat(mimeType, width, height)
         format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
 
-        val decoder = MediaCodec.createDecoderByType(MIME_TYPE)
+        val decoder = MediaCodec.createDecoderByType(mimeType)
 
         // Async callback — MUST be set before configure()
         decoder.setCallback(object : MediaCodec.Callback() {
@@ -111,7 +109,7 @@ class HardwareDecoder {
         droppedCount = 0
         decodedCount = 0
 
-        Log.i(TAG, "HEVC decoder ready (async mode)")
+        Log.i(TAG, "${if (isHevc) "HEVC" else "H.264"} decoder ready (async mode)")
     }
 
     /**
@@ -225,9 +223,17 @@ class HardwareDecoder {
             val nalHeaderOffset = offset + 4 // skip 4-byte start code
             if (nalHeaderOffset >= data.size) continue
 
-            val nalType = (data[nalHeaderOffset].toInt() shr 1) and 0x3F
+            val isCsd = if (isHevc) {
+                // HEVC: NAL type is bits 1-6 of first byte. VPS=32, SPS=33, PPS=34
+                val nalType = (data[nalHeaderOffset].toInt() shr 1) and 0x3F
+                nalType in 32..34
+            } else {
+                // H.264: NAL type is bits 0-4 of first byte. SPS=7, PPS=8
+                val nalType = data[nalHeaderOffset].toInt() and 0x1F
+                nalType == 7 || nalType == 8
+            }
 
-            if (nalType in NAL_TYPE_VPS..NAL_TYPE_PPS) {
+            if (isCsd) {
                 csdParts.add(Pair(offset, length))
             } else {
                 frameParts.add(Pair(offset, length))

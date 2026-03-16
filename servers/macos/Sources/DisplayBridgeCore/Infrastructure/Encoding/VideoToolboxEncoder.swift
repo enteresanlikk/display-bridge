@@ -15,10 +15,12 @@ public enum VideoEncoderError: Error, Sendable {
 private final class EncoderOutputContext {
     let completion: (Result<EncodedFrame, Error>) -> Void
     let sequenceNumber: UInt64
+    let codec: VideoCodec
 
-    init(completion: @escaping (Result<EncodedFrame, Error>) -> Void, sequenceNumber: UInt64) {
+    init(completion: @escaping (Result<EncodedFrame, Error>) -> Void, sequenceNumber: UInt64, codec: VideoCodec) {
         self.completion = completion
         self.sequenceNumber = sequenceNumber
+        self.codec = codec
     }
 }
 
@@ -28,6 +30,7 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
     private var isConfigured = false
     private var currentWidth: Int = 0
     private var currentHeight: Int = 0
+    private var currentCodec: VideoCodec = .hevc
     private let lock = NSLock()
 
     public init() {}
@@ -37,7 +40,7 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
     public func setup(config: DeviceConfig) throws {
         lock.lock()
 
-        if isConfigured && currentWidth == config.width && currentHeight == config.height {
+        if isConfigured && currentWidth == config.width && currentHeight == config.height && currentCodec == config.codec {
             lock.unlock()
             return
         }
@@ -112,27 +115,51 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
             var annexBData = Data(capacity: totalLength + 128)
             let startCode: UInt32 = 0x01000000 // 00 00 00 01 in memory
 
-            // For keyframes, extract and prepend VPS/SPS/PPS parameter sets
+            // For keyframes, extract and prepend parameter sets (HEVC: VPS/SPS/PPS, H.264: SPS/PPS)
             if isKeyFrame, let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
                 var paramSetCount: Int = 0
-                CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-                    formatDesc, parameterSetIndex: 0,
-                    parameterSetPointerOut: nil, parameterSetSizeOut: nil,
-                    parameterSetCountOut: &paramSetCount, nalUnitHeaderLengthOut: nil
-                )
 
-                for i in 0..<paramSetCount {
-                    var paramPointer: UnsafePointer<UInt8>?
-                    var paramSize: Int = 0
-                    let paramStatus = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-                        formatDesc, parameterSetIndex: i,
-                        parameterSetPointerOut: &paramPointer,
-                        parameterSetSizeOut: &paramSize,
-                        parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil
+                switch context.codec {
+                case .hevc:
+                    CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+                        formatDesc, parameterSetIndex: 0,
+                        parameterSetPointerOut: nil, parameterSetSizeOut: nil,
+                        parameterSetCountOut: &paramSetCount, nalUnitHeaderLengthOut: nil
                     )
-                    if paramStatus == noErr, let pointer = paramPointer {
-                        withUnsafeBytes(of: startCode) { annexBData.append(contentsOf: $0) }
-                        annexBData.append(pointer, count: paramSize)
+                    for i in 0..<paramSetCount {
+                        var paramPointer: UnsafePointer<UInt8>?
+                        var paramSize: Int = 0
+                        let s = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+                            formatDesc, parameterSetIndex: i,
+                            parameterSetPointerOut: &paramPointer,
+                            parameterSetSizeOut: &paramSize,
+                            parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil
+                        )
+                        if s == noErr, let p = paramPointer {
+                            withUnsafeBytes(of: startCode) { annexBData.append(contentsOf: $0) }
+                            annexBData.append(p, count: paramSize)
+                        }
+                    }
+
+                case .h264:
+                    CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                        formatDesc, parameterSetIndex: 0,
+                        parameterSetPointerOut: nil, parameterSetSizeOut: nil,
+                        parameterSetCountOut: &paramSetCount, nalUnitHeaderLengthOut: nil
+                    )
+                    for i in 0..<paramSetCount {
+                        var paramPointer: UnsafePointer<UInt8>?
+                        var paramSize: Int = 0
+                        let s = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                            formatDesc, parameterSetIndex: i,
+                            parameterSetPointerOut: &paramPointer,
+                            parameterSetSizeOut: &paramSize,
+                            parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil
+                        )
+                        if s == noErr, let p = paramPointer {
+                            withUnsafeBytes(of: startCode) { annexBData.append(contentsOf: $0) }
+                            annexBData.append(p, count: paramSize)
+                        }
                     }
                 }
             }
@@ -193,8 +220,11 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 60 as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 2.0 as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: config.refreshRate as CFNumber)
+        let profileLevel: CFString = config.codec == .hevc
+            ? kVTProfileLevel_HEVC_Main_AutoLevel
+            : kVTProfileLevel_H264_Main_AutoLevel
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel,
-                           value: kVTProfileLevel_HEVC_Main_AutoLevel)
+                           value: profileLevel)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality, value: kCFBooleanTrue)
         let dataRateLimits: [Int] = [6_250_000, 1] // 50 Mbps cap
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits as CFArray)
@@ -205,6 +235,7 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
         self.isConfigured = true
         self.currentWidth = config.width
         self.currentHeight = config.height
+        self.currentCodec = config.codec
     }
 
     /// Synchronous encode — blocks the calling thread until hardware encoder finishes.
@@ -217,6 +248,7 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
             throw VideoEncoderError.notConfigured
         }
         let seq = sequenceCounter
+        let codec = currentCodec
         sequenceCounter += 1
         lock.unlock()
 
@@ -244,7 +276,8 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
                 encodeResult = result
                 sem.signal()
             },
-            sequenceNumber: seq
+            sequenceNumber: seq,
+            codec: codec
         )
         let refcon = Unmanaged.passRetained(context).toOpaque()
 
