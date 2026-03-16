@@ -81,7 +81,7 @@ class USBSocketTransport(
      *
      * @param callback Called with each complete packet (header + payload bytes).
      */
-    override fun receiveLoop(callback: (ByteArray) -> Unit) {
+    override fun receiveLoop(callback: (ByteArray) -> Unit, onComplete: (() -> Unit)?) {
         receiveThread = Thread({
             val input = inputStream ?: return@Thread
             Log.i(TAG, "Receive loop started")
@@ -123,6 +123,7 @@ class USBSocketTransport(
                 }
             } finally {
                 Log.i(TAG, "Receive loop ended")
+                onComplete?.invoke()
             }
         }, "DisplayBridge-Receive")
 

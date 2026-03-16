@@ -76,7 +76,7 @@ class USBAccessoryTransport(
         }
     }
 
-    override fun receiveLoop(callback: (ByteArray) -> Unit) {
+    override fun receiveLoop(callback: (ByteArray) -> Unit, onComplete: (() -> Unit)?) {
         receiveThread = Thread({
             val input = inputStream ?: return@Thread
             Log.i(TAG, "Receive loop started (USB Accessory, BufferedInputStream 256KB)")
@@ -139,6 +139,7 @@ class USBAccessoryTransport(
             } finally {
                 Log.i(TAG, "Receive loop ended")
                 debugStatus = "loop ended (pkts=$debugPacketCount)"
+                onComplete?.invoke()
             }
         }, "DisplayBridge-USB-Receive")
 

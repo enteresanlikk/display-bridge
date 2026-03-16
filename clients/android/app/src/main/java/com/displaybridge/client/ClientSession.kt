@@ -85,8 +85,6 @@ class ClientSession(
                 listener?.onConnected()
                 startStreaming()
 
-                Log.i(TAG, "Receive loop ended")
-
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start session: ${e.message}", e)
                 listener?.onError("Connection failed: ${e.message}")
@@ -102,7 +100,7 @@ class ClientSession(
      * Starts the receive loop, processing incoming packets from the server.
      */
     private fun startStreaming() {
-        transport.receiveLoop { packetData ->
+        transport.receiveLoop({ packetData ->
             if (!isRunning) return@receiveLoop
 
             try {
@@ -110,6 +108,12 @@ class ClientSession(
                 handlePacket(packet)
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing packet: ${e.message}")
+            }
+        }) {
+            // Receive loop ended — server disconnected or connection lost
+            Log.i(TAG, "Receive loop ended — server disconnected")
+            if (isRunning) {
+                stop()
             }
         }
     }

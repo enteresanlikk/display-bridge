@@ -7,7 +7,7 @@ package com.displaybridge.client.transport
 interface Transport {
     fun connect()
     fun send(data: ByteArray)
-    fun receiveLoop(callback: (ByteArray) -> Unit)
+    fun receiveLoop(callback: (ByteArray) -> Unit, onComplete: (() -> Unit)? = null)
     fun disconnect()
     fun isConnected(): Boolean
 }

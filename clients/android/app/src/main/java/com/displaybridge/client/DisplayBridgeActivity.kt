@@ -355,6 +355,7 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
         runOnUiThread {
             Log.i(TAG, "Disconnected: $reason")
             Toast.makeText(this, "Disconnected: $reason", Toast.LENGTH_SHORT).show()
+            finish()
         }
     }
 
