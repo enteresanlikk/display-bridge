@@ -75,7 +75,3 @@ DisplayBridge/
 VirtualDisplay → ScreenCapturer (IOSurface) → VideoToolboxEncoder (H.265 HW)
     → PacketFramer (28B header + NAL) → TCP Transport → Android Client
 ```
-
-## License
-
-MIT

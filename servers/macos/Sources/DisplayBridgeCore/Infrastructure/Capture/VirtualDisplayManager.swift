@@ -37,6 +37,14 @@ public final class VirtualDisplayManager: @unchecked Sendable {
         self.serial = Self.allocSerial()
     }
 
+    deinit {
+        if virtualDisplayObject != nil {
+            print("[VirtualDisplayManager] deinit — destroying orphaned virtual display (ID: \(virtualDisplayID ?? 0))")
+            virtualDisplayObject = nil
+            virtualDisplayID = nil
+        }
+    }
+
     /// Creates a virtual display with the given configuration.
     /// Returns the display ID for the new virtual display.
     public func create(config: DeviceConfig, deviceName: String? = nil) throws -> CGDirectDisplayID {
@@ -105,6 +113,22 @@ public final class VirtualDisplayManager: @unchecked Sendable {
 
     // MARK: - macOS 14+ CGVirtualDisplay via objc_msgSend
 
+    /// Helper: [[cls alloc] init] with correct ObjC ownership semantics.
+    /// alloc returns +1, init consumes it and returns +1. We use raw pointers
+    /// to avoid ARC over-retaining the +1 return, then bridge via
+    /// Unmanaged.takeRetainedValue() so ARC takes correct ownership.
+    private static func objcAllocInit(_ cls: AnyClass, msgSendPtr: UnsafeMutableRawPointer) -> AnyObject {
+        typealias AllocFn = @convention(c) (AnyObject, Selector) -> UnsafeMutableRawPointer
+        typealias InitFn  = @convention(c) (UnsafeMutableRawPointer, Selector) -> UnsafeMutableRawPointer
+
+        let alloc = unsafeBitCast(msgSendPtr, to: AllocFn.self)
+        let initFn = unsafeBitCast(msgSendPtr, to: InitFn.self)
+
+        let raw = alloc(cls as AnyObject, NSSelectorFromString("alloc"))
+        let obj = initFn(raw, NSSelectorFromString("init"))
+        return Unmanaged<AnyObject>.fromOpaque(obj).takeRetainedValue()
+    }
+
     @available(macOS 14.0, *)
     private func createVirtualDisplay(config: DeviceConfig, deviceName: String? = nil) throws -> CGDirectDisplayID {
         guard let descriptorClass: AnyClass = NSClassFromString("CGVirtualDisplayDescriptor"),
@@ -119,23 +143,22 @@ public final class VirtualDisplayManager: @unchecked Sendable {
             throw VirtualDisplayError.creationFailed("dlsym(objc_msgSend) failed")
         }
 
-        typealias MsgSendVoid = @convention(c) (AnyObject, Selector) -> AnyObject
-        typealias MsgSendObj1 = @convention(c) (AnyObject, Selector, AnyObject) -> AnyObject?
-        typealias MsgSendBool1 = @convention(c) (AnyObject, Selector, AnyObject) -> Bool
-        typealias MsgSendUInt32 = @convention(c) (AnyObject, Selector) -> UInt32
-        typealias MsgSendInitMode = @convention(c) (AnyObject, Selector, UInt32, UInt32, Double) -> AnyObject?
+        // Raw-pointer alloc/init variants — avoids ARC over-retaining +1 returns
+        typealias AllocFn     = @convention(c) (AnyObject, Selector) -> UnsafeMutableRawPointer
+        typealias InitObjFn   = @convention(c) (UnsafeMutableRawPointer, Selector, AnyObject) -> UnsafeMutableRawPointer?
+        typealias InitModeFn  = @convention(c) (UnsafeMutableRawPointer, Selector, UInt32, UInt32, Double) -> UnsafeMutableRawPointer?
+        // ARC-safe types for property access / queries (no ownership transfer)
+        typealias BoolObjFn   = @convention(c) (AnyObject, Selector, AnyObject) -> Bool
+        typealias UInt32Fn    = @convention(c) (AnyObject, Selector) -> UInt32
 
-        let msgSend = unsafeBitCast(msgSendPtr, to: MsgSendVoid.self)
-        let msgSendObj1 = unsafeBitCast(msgSendPtr, to: MsgSendObj1.self)
-        let msgSendBool1 = unsafeBitCast(msgSendPtr, to: MsgSendBool1.self)
-        let msgSendUInt32 = unsafeBitCast(msgSendPtr, to: MsgSendUInt32.self)
-        let msgSendInitMode = unsafeBitCast(msgSendPtr, to: MsgSendInitMode.self)
+        let fnAlloc     = unsafeBitCast(msgSendPtr, to: AllocFn.self)
+        let fnInitObj   = unsafeBitCast(msgSendPtr, to: InitObjFn.self)
+        let fnInitMode  = unsafeBitCast(msgSendPtr, to: InitModeFn.self)
+        let fnBoolObj   = unsafeBitCast(msgSendPtr, to: BoolObjFn.self)
+        let fnUInt32    = unsafeBitCast(msgSendPtr, to: UInt32Fn.self)
 
         // 1. Create descriptor: [[CGVirtualDisplayDescriptor alloc] init]
-        let allocSel = NSSelectorFromString("alloc")
-        let initSel = NSSelectorFromString("init")
-        let descriptorRaw = msgSend(descriptorClass as AnyObject, allocSel)
-        let descriptor = msgSend(descriptorRaw, initSel)
+        let descriptor = Self.objcAllocInit(descriptorClass, msgSendPtr: msgSendPtr)
 
         // Set descriptor properties via KVC
         let queue = DispatchQueue(label: "com.displaybridge.virtualdisplay")
@@ -166,39 +189,36 @@ public final class VirtualDisplayManager: @unchecked Sendable {
         }
 
         // 2. Create display: [[CGVirtualDisplay alloc] initWithDescriptor:descriptor]
-        let displayRaw = msgSend(displayClass as AnyObject, allocSel)
-        let initWithDescSel = NSSelectorFromString("initWithDescriptor:")
-        guard let display = msgSendObj1(displayRaw, initWithDescSel, descriptor) else {
+        let dispRaw = fnAlloc(displayClass as AnyObject, NSSelectorFromString("alloc"))
+        guard let dispPtr = fnInitObj(dispRaw, NSSelectorFromString("initWithDescriptor:"), descriptor) else {
             throw VirtualDisplayError.creationFailed("initWithDescriptor: returned nil")
         }
+        let display = Unmanaged<AnyObject>.fromOpaque(dispPtr).takeRetainedValue()
 
         // 3. Create mode: [[CGVirtualDisplayMode alloc] initWithWidth:height:refreshRate:]
-        let modeRaw = msgSend(modeClass as AnyObject, allocSel)
-        let initModeSel = NSSelectorFromString("initWithWidth:height:refreshRate:")
-        guard let mode = msgSendInitMode(
+        let modeRaw = fnAlloc(modeClass as AnyObject, NSSelectorFromString("alloc"))
+        guard let modePtr = fnInitMode(
             modeRaw,
-            initModeSel,
+            NSSelectorFromString("initWithWidth:height:refreshRate:"),
             UInt32(config.width),
             UInt32(config.height),
             Double(config.refreshRate)
         ) else {
             throw VirtualDisplayError.creationFailed("initWithWidth:height:refreshRate: returned nil")
         }
+        let mode = Unmanaged<AnyObject>.fromOpaque(modePtr).takeRetainedValue()
 
         // 4. Create settings, set modes, apply
-        let settingsRaw = msgSend(settingsClass as AnyObject, allocSel)
-        let settings = msgSend(settingsRaw, initSel)
+        let settings = Self.objcAllocInit(settingsClass, msgSendPtr: msgSendPtr)
         (settings as! NSObject).setValue([mode], forKey: "modes")
 
-        let applySel = NSSelectorFromString("applySettings:")
-        let applied = msgSendBool1(display, applySel, settings)
+        let applied = fnBoolObj(display, NSSelectorFromString("applySettings:"), settings)
         if !applied {
             print("[VirtualDisplayManager] Warning: applySettings: returned false")
         }
 
         // 5. Read displayID via objc_msgSend (UInt32 return, NOT KVC)
-        let displayIDSel = NSSelectorFromString("displayID")
-        let cgDisplayID = msgSendUInt32(display, displayIDSel)
+        let cgDisplayID = fnUInt32(display, NSSelectorFromString("displayID"))
 
         if cgDisplayID != 0 {
             self.virtualDisplayObject = display

@@ -90,6 +90,11 @@ public final class ActiveClients: @unchecked Sendable {
             entry.vdm.destroy()
             print("[Server] Cleaned up client \(id.uuidString.prefix(8))")
         }
+
+        // Await tasks to ensure handleClient fully completes and releases all resources
+        for (_, entry) in snap {
+            await entry.task?.value
+        }
     }
 }
 
