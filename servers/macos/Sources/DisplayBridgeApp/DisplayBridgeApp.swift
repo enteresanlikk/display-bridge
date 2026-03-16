@@ -61,6 +61,7 @@ extension AppDelegate: NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
         NSApplication.shared.setActivationPolicy(.accessory)
+        NSApplication.shared.hide(nil)
         return false
     }
 }
