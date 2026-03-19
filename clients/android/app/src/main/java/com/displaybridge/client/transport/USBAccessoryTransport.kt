@@ -228,8 +228,6 @@ class USBAccessoryTransport(
                         if (packetType == PacketType.DISCONNECT || packetType == PacketType.ERROR) {
                             Log.i(TAG, "Received ${packetType.name} packet from server — stopping receive loop")
                             packetQueue.put(fullPacket) // let ClientSession handle the message
-                            // Give process thread a moment to handle the packet
-                            Thread.sleep(100)
                             connected = false
                             break
                         }

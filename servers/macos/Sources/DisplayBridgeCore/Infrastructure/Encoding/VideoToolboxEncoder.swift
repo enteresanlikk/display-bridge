@@ -213,21 +213,31 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
             throw VideoEncoderError.sessionCreationFailed(status)
         }
 
-        // Configure session properties for ultra-low-latency encoding
+        // Configure session properties for low-latency, high-quality encoding
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: 100_000_000 as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 120 as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 2.0 as CFNumber)
+
+        // Adaptive bitrate: 0.4 bits/pixel/frame — sharp text at any resolution
+        //   1080p@60  → ~50 Mbps     1080p@120 → ~100 Mbps
+        //   1848p@120 → ~263 Mbps    4K@60     → ~199 Mbps
+        //   4K@120    → ~398 Mbps
+        let pixelsPerFrame = config.width * config.height
+        let targetBitrate = Double(pixelsPerFrame) * 0.4 * Double(config.refreshRate)
+        let bitrate = max(50_000_000, min(500_000_000, Int(targetBitrate)))
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
+
+        // Hard cap: 25% headroom above average for keyframe bursts
+        let dataRateLimits: [Int] = [bitrate / 8 * 5 / 4, 1]
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits as CFArray)
+
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: config.refreshRate as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 1.0 as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: config.refreshRate as CFNumber)
         let profileLevel: CFString = config.codec == .hevc
             ? kVTProfileLevel_HEVC_Main_AutoLevel
             : kVTProfileLevel_H264_Main_AutoLevel
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel,
                            value: profileLevel)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality, value: kCFBooleanTrue)
-        let dataRateLimits: [Int] = [12_500_000, 1] // 100 Mbps cap
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits as CFArray)
 
         VTCompressionSessionPrepareToEncodeFrames(session)
 
