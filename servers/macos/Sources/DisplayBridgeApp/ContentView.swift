@@ -124,11 +124,8 @@ struct ContentView: View {
                                             .foregroundStyle(client.transportType == "USB" ? .orange : .blue)
                                             .clipShape(RoundedRectangle(cornerRadius: 3))
                                     }
-                                    HStack(spacing: 8) {
-                                        Text(client.connectedAt, style: .relative)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        if client.sentFPS > 0 {
+                                    if client.sentFPS > 0 {
+                                        HStack(spacing: 8) {
                                             Text("\(Int(client.sentFPS)) fps")
                                                 .font(.caption.monospacedDigit())
                                                 .foregroundStyle(.green)

@@ -55,6 +55,8 @@ private final class PipelineMetrics: @unchecked Sendable {
         let avgLatencyMs: Double
         let maxLatencyMs: Double
         let intervalSec: Double
+        let throughputMbps: Double
+        let avgFrameSizeKB: Double
     }
 
     private var _lock = os_unfair_lock()
@@ -63,12 +65,14 @@ private final class PipelineMetrics: @unchecked Sendable {
     private var _sentCount: UInt64 = 0
     private var _totalLatencyUs: UInt64 = 0
     private var _maxLatencyUs: UInt64 = 0
+    private var _totalSentBytes: UInt64 = 0
 
     private var _lastSnapshotNs: UInt64 = DispatchTime.now().uptimeNanoseconds
     private var _lastCaptureCount: UInt64 = 0
     private var _lastSentCount: UInt64 = 0
     private var _lastTotalLatencyUs: UInt64 = 0
     private var _lastMaxLatencyUs: UInt64 = 0
+    private var _lastTotalSentBytes: UInt64 = 0
 
     func recordCapture() {
         os_unfair_lock_lock(&_lock)
@@ -76,10 +80,11 @@ private final class PipelineMetrics: @unchecked Sendable {
         os_unfair_lock_unlock(&_lock)
     }
 
-    func recordSent(latencyUs: UInt64) {
+    func recordSent(latencyUs: UInt64, bytes: Int) {
         os_unfair_lock_lock(&_lock)
         _sentCount += 1
         _totalLatencyUs += latencyUs
+        _totalSentBytes += UInt64(bytes)
         if latencyUs > _maxLatencyUs {
             _maxLatencyUs = latencyUs
         }
@@ -94,19 +99,22 @@ private final class PipelineMetrics: @unchecked Sendable {
         let deltaSent = _sentCount - _lastSentCount
         let deltaLatency = _totalLatencyUs - _lastTotalLatencyUs
         let maxLat = _maxLatencyUs
+        let deltaBytes = _totalSentBytes - _lastTotalSentBytes
 
         _lastSnapshotNs = now
         _lastCaptureCount = _captureCount
         _lastSentCount = _sentCount
         _lastTotalLatencyUs = _totalLatencyUs
         _lastMaxLatencyUs = _maxLatencyUs
+        _lastTotalSentBytes = _totalSentBytes
         _maxLatencyUs = 0
         os_unfair_lock_unlock(&_lock)
 
         let intervalSec = Double(deltaNs) / 1_000_000_000.0
         guard intervalSec > 0 else {
             return Stats(captureFPS: 0, sentFPS: 0, droppedPercent: 0,
-                         avgLatencyMs: 0, maxLatencyMs: 0, intervalSec: 0)
+                         avgLatencyMs: 0, maxLatencyMs: 0, intervalSec: 0,
+                         throughputMbps: 0, avgFrameSizeKB: 0)
         }
 
         let capFPS = Double(deltaCapture) / intervalSec
@@ -118,10 +126,15 @@ private final class PipelineMetrics: @unchecked Sendable {
             ? Double(deltaLatency) / Double(deltaSent) / 1000.0
             : 0.0
         let maxMs = Double(maxLat) / 1000.0
+        let mbps = Double(deltaBytes) * 8.0 / 1_000_000.0 / intervalSec
+        let avgFrameKB = deltaSent > 0
+            ? Double(deltaBytes) / Double(deltaSent) / 1024.0
+            : 0.0
 
         return Stats(captureFPS: capFPS, sentFPS: sentFPS,
                      droppedPercent: dropPct, avgLatencyMs: avgMs,
-                     maxLatencyMs: maxMs, intervalSec: intervalSec)
+                     maxLatencyMs: maxMs, intervalSec: intervalSec,
+                     throughputMbps: mbps, avgFrameSizeKB: avgFrameKB)
     }
 }
 
@@ -355,10 +368,11 @@ public actor SessionCoordinator {
                 let encoded = try enc.encodeSync(frame)
                 let packet = PacketFramer.wrapVideoFrame(encoded)
 
+                let packetSize = packet.count
                 trans.sendTracked(packet) {
                     let totalUs = (DispatchTime.now().uptimeNanoseconds - frame.captureTimeNs) / 1000
                     gate.leave()
-                    metrics.recordSent(latencyUs: totalUs)
+                    metrics.recordSent(latencyUs: totalUs, bytes: packetSize)
                 }
             } catch {
                 gate.leave()
@@ -384,8 +398,8 @@ public actor SessionCoordinator {
 
                 // Pipeline stats
                 if let s = metrics?.snapshot() {
-                    print(String(format: "[STATS] capture=%.0ffps sent=%.0ffps | drop=%.0f%% | latency avg=%.1fms max=%.1fms",
-                                 s.captureFPS, s.sentFPS, s.droppedPercent, s.avgLatencyMs, s.maxLatencyMs))
+                    print(String(format: "[STATS] capture=%.0ffps sent=%.0ffps | drop=%.0f%% | latency avg=%.1fms max=%.1fms | %.0fMbps ~%.0fKB/frame",
+                                 s.captureFPS, s.sentFPS, s.droppedPercent, s.avgLatencyMs, s.maxLatencyMs, s.throughputMbps, s.avgFrameSizeKB))
                     self?.onStatsUpdated?(ClientStats(
                         captureFPS: s.captureFPS, sentFPS: s.sentFPS,
                         droppedPercent: s.droppedPercent,

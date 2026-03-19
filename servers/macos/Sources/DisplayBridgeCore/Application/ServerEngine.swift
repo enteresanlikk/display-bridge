@@ -240,6 +240,11 @@ public final class ServerEngine: @unchecked Sendable {
         let vdm = VirtualDisplayManager()
         let capturer = ScreenCapturer(virtualDisplayID: CGMainDisplayID())
         let encoder = VideoToolboxEncoder()
+        // USB 2.0 AOA practical bandwidth limited by f_accessory per-chunk overhead.
+        // 150 Mbps keeps frame sizes small enough for <30ms USB write time.
+        if transportType == "USB" {
+            encoder.maxBitrate = 150_000_000
+        }
         let pipelineReady = AtomicFlag()
 
         let coordinator = SessionCoordinator(

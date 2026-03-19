@@ -91,7 +91,7 @@ public final class ScreenCapturer: NSObject, DisplayCapturing, SCStreamOutput, @
         streamConfig.height = config.height
         streamConfig.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(config.refreshRate))
         streamConfig.pixelFormat = kCVPixelFormatType_32BGRA
-        streamConfig.queueDepth = 3
+        streamConfig.queueDepth = 2
         streamConfig.showsCursor = true
 
         if #available(macOS 14.0, *) {

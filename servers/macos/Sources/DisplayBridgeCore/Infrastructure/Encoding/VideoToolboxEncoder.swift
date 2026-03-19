@@ -33,6 +33,10 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
     private var currentCodec: VideoCodec = .hevc
     private let lock = NSLock()
 
+    /// Maximum bitrate in bits/sec. Set before `setup()` to limit for bandwidth-constrained transports.
+    /// USB 2.0 AOA: ~200 Mbps practical limit. TCP: effectively unlimited.
+    public var maxBitrate: Int = 500_000_000
+
     public init() {}
 
     /// Sets up the compression session with the given configuration.
@@ -216,14 +220,16 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
         // Configure session properties for low-latency, high-quality encoding
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
+        // Zero frame delay: encoder outputs immediately without internal buffering
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: 0 as CFNumber)
 
         // Adaptive bitrate: 0.4 bits/pixel/frame — sharp text at any resolution
-        //   1080p@60  → ~50 Mbps     1080p@120 → ~100 Mbps
-        //   1848p@120 → ~263 Mbps    4K@60     → ~199 Mbps
-        //   4K@120    → ~398 Mbps
+        // Capped by maxBitrate (USB 2.0 = 200 Mbps, TCP = 500 Mbps)
+        //   TCP:  1080p@120→100M  4K@60→199M  4K@120→398M
+        //   USB:  1080p@120→100M  4K@60→199M  4K@120→200M (capped)
         let pixelsPerFrame = config.width * config.height
         let targetBitrate = Double(pixelsPerFrame) * 0.4 * Double(config.refreshRate)
-        let bitrate = max(50_000_000, min(500_000_000, Int(targetBitrate)))
+        let bitrate = max(50_000_000, min(maxBitrate, Int(targetBitrate)))
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
 
         // Hard cap: 25% headroom above average for keyframe bursts
