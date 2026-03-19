@@ -112,26 +112,32 @@ public enum PacketFramer {
 
     /// Wraps an EncodedFrame into a full packet ready for transmission.
     /// Video payload format: [0] isKeyFrame (1 byte) + [1..3] reserved (3 bytes) + NAL data
+    ///
+    /// Builds the final packet in a single allocation to avoid copying
+    /// the NAL data twice (old path: NAL→videoPayload→packet = 2 copies).
     public static func wrapVideoFrame(_ frame: EncodedFrame) -> Data {
-        var videoPayload = Data(capacity: 4 + frame.data.count)
+        let payloadLength = 4 + frame.data.count
+        let totalSize = headerSize + payloadLength
+        var packet = Data(capacity: totalSize)
 
-        // 1 byte: isKeyFrame flag
-        videoPayload.append(frame.isKeyFrame ? 1 : 0)
-
-        // 3 bytes: reserved
-        videoPayload.append(contentsOf: [0x00, 0x00, 0x00])
-
-        // NAL unit data
-        videoPayload.append(frame.data)
-
+        // Header (28 bytes)
+        packet.append(contentsOf: magic)
+        packet.append(PacketType.videoFrame.rawValue)
+        packet.append(contentsOf: [0x00, 0x00, 0x00])
+        var seqLE = frame.sequenceNumber.littleEndian
+        withUnsafeBytes(of: &seqLE) { packet.append(contentsOf: $0) }
         let timestampMicros = UInt64(frame.timestamp.seconds * 1_000_000)
+        var tsLE = timestampMicros.littleEndian
+        withUnsafeBytes(of: &tsLE) { packet.append(contentsOf: $0) }
+        var lenLE = UInt32(payloadLength).littleEndian
+        withUnsafeBytes(of: &lenLE) { packet.append(contentsOf: $0) }
 
-        return createPacket(
-            type: .videoFrame,
-            sequenceNumber: frame.sequenceNumber,
-            timestamp: timestampMicros,
-            payload: videoPayload
-        )
+        // Video payload: keyframe flag (1B) + reserved (3B) + NAL data (single copy)
+        packet.append(frame.isKeyFrame ? 1 : 0)
+        packet.append(contentsOf: [0x00, 0x00, 0x00])
+        packet.append(frame.data)
+
+        return packet
     }
 
     /// Extracts an EncodedFrame from a video packet payload.

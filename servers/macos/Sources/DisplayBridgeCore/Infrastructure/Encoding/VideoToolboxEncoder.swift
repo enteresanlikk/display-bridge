@@ -217,8 +217,8 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: 50_000_000 as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 60 as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 2.0 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 300 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 5.0 as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: config.refreshRate as CFNumber)
         let profileLevel: CFString = config.codec == .hevc
             ? kVTProfileLevel_HEVC_Main_AutoLevel
