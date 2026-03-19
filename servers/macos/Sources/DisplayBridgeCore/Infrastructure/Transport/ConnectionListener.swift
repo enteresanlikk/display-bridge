@@ -1,8 +1,5 @@
 import Foundation
 import Network
-import os
-
-private let listenerLog = OSLog(subsystem: "com.displaybridge", category: "listener")
 
 /// Listens on a TCP port and yields each new client as a `ClientConnection`
 /// via an `AsyncStream`. Used by main.swift to orchestrate multiple clients.

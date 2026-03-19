@@ -4,21 +4,6 @@ import os
 
 private let pipeLog = OSLog(subsystem: "com.displaybridge", category: "pipeline")
 
-/// Simple atomic counter using os_unfair_lock.
-private final class AtomicCounter: @unchecked Sendable {
-    private var _lock = os_unfair_lock()
-    private var _value: UInt64 = 0
-
-    /// Increments and returns the NEW value.
-    func add(_ n: UInt64) -> UInt64 {
-        os_unfair_lock_lock(&_lock)
-        _value += n
-        let v = _value
-        os_unfair_lock_unlock(&_lock)
-        return v
-    }
-}
-
 /// Lock-free gate that ensures at most 1 frame is in the TCP send pipeline.
 /// If a frame is being sent, new frames are dropped (always show latest, never queue).
 private final class PipelineGate: @unchecked Sendable {
@@ -148,6 +133,10 @@ public struct ClientStats: Sendable {
     public let maxLatencyMs: Double
 }
 
+public enum SessionError: Error, Sendable {
+    case invalidConfig(String)
+}
+
 public actor SessionCoordinator {
     /// Called when the client handshake or config update arrives with its DeviceConfig.
     /// The handler should recreate VDM/encoder/capturer to match the client's resolution.
@@ -218,13 +207,13 @@ public actor SessionCoordinator {
         // Critical for USB AOA: Android's f_accessory read() blocks forever
         // when the cable stays connected, so the client can't detect disconnect
         // without an explicit packet.
-        let errorPacket = PacketFramer.createPacket(
-            type: .error,
+        let disconnectPacket = PacketFramer.createPacket(
+            type: .disconnect,
             sequenceNumber: 0,
             timestamp: currentTimestampMicros(),
-            payload: Data("server_shutdown".utf8)
+            payload: Data()
         )
-        try? await transport.send(errorPacket)
+        try? await transport.send(disconnectPacket)
 
         await transport.disconnect()
 
@@ -274,8 +263,20 @@ public actor SessionCoordinator {
         }
     }
 
+    private func validateConfig(_ config: DeviceConfig) throws {
+        guard (1...7680).contains(config.width),
+              (1...4320).contains(config.height),
+              (1...240).contains(config.refreshRate) else {
+            throw SessionError.invalidConfig(
+                "Invalid config: \(config.width)x\(config.height)@\(config.refreshRate)Hz"
+            )
+        }
+    }
+
     private func handleHandshakeReq(payload: Data) async throws {
         let clientConfig = try JSONDecoder().decode(DeviceConfig.self, from: payload)
+        try validateConfig(clientConfig)
+
         let stateStr: String = session?.state != nil ? "\(session!.state)" : "nil"
         print("[SessionCoordinator] Received handshake: \(clientConfig.width)x\(clientConfig.height) @ \(clientConfig.refreshRate)Hz (state=\(stateStr))")
 
@@ -310,6 +311,7 @@ public actor SessionCoordinator {
 
     private func handleConfigUpdate(payload: Data) async throws {
         let newConfig = try JSONDecoder().decode(DeviceConfig.self, from: payload)
+        try validateConfig(newConfig)
         print("[SessionCoordinator] CONFIG_UPDATE: \(newConfig.width)x\(newConfig.height) @ \(newConfig.refreshRate)Hz")
 
         // Stop current capture

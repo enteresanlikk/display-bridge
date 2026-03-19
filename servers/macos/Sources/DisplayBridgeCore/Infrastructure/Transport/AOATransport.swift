@@ -87,11 +87,6 @@ public final class AOATransport: @unchecked Sendable, DataTransporting {
         }
     }
 
-    /// Fire-and-forget send via the write queue.
-    public func sendNonBlocking(_ data: Data) {
-        sendTracked(data, onComplete: {})
-    }
-
     /// Blocking bulk write with completion callback + inter-frame delay.
     public func sendTracked(_ data: Data, onComplete: @escaping @Sendable () -> Void) {
         guard !lock.withLock({ isDisconnected }) else {
@@ -261,22 +256,7 @@ public final class AOATransport: @unchecked Sendable, DataTransporting {
                 buffer.append(chunk, count: Int(readLength))
             }
 
-            while buffer.count >= PacketFramer.headerSize {
-                let lenStart = buffer.startIndex + 24
-                let lenEnd = lenStart + 4
-                let payloadLength = Int(
-                    buffer[lenStart..<lenEnd]
-                        .withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
-                        .littleEndian
-                )
-
-                let totalPacketSize = PacketFramer.headerSize + payloadLength
-                guard buffer.count >= totalPacketSize else {
-                    break
-                }
-
-                let packet = Data(buffer.prefix(totalPacketSize))
-                buffer.removeFirst(totalPacketSize)
+            for packet in PacketFramer.extractPackets(from: &buffer) {
                 continuation.yield(packet)
             }
         }

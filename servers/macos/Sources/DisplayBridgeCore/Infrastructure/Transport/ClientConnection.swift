@@ -1,8 +1,5 @@
 import Foundation
 import Network
-import os
-
-private let connLog = OSLog(subsystem: "com.displaybridge", category: "client-conn")
 
 /// Buffer accumulator for TCP framing – collects raw chunks until a complete packet is available.
 private final class ReceiveBuffer {
@@ -41,10 +38,6 @@ public final class ClientConnection: @unchecked Sendable, DataTransporting {
                 }
             })
         }
-    }
-
-    public func sendNonBlocking(_ data: Data) {
-        connection.send(content: data, completion: .idempotent)
     }
 
     public func sendTracked(_ data: Data, onComplete: @escaping @Sendable () -> Void) {
@@ -107,23 +100,7 @@ public final class ClientConnection: @unchecked Sendable, DataTransporting {
                 buffer.data.append(data)
             }
 
-            // Extract complete packets from the buffer
-            while buffer.data.count >= PacketFramer.headerSize {
-                let lenStart = buffer.data.startIndex + 24
-                let lenEnd = lenStart + 4
-                let payloadLength = Int(
-                    buffer.data[lenStart..<lenEnd]
-                        .withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
-                        .littleEndian
-                )
-
-                let totalPacketSize = PacketFramer.headerSize + payloadLength
-                guard buffer.data.count >= totalPacketSize else {
-                    break
-                }
-
-                let packet = Data(buffer.data.prefix(totalPacketSize))
-                buffer.data.removeFirst(totalPacketSize)
+            for packet in PacketFramer.extractPackets(from: &buffer.data) {
                 continuation.yield(packet)
             }
 

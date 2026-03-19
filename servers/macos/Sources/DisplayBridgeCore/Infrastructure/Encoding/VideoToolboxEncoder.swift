@@ -113,7 +113,7 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
 
             // Convert HVCC (length-prefixed) to Annex B (start-code-prefixed) format
             var annexBData = Data(capacity: totalLength + 128)
-            let startCode: UInt32 = 0x01000000 // 00 00 00 01 in memory
+            let startCodeData = Data([0x00, 0x00, 0x00, 0x01])
 
             // For keyframes, extract and prepend parameter sets (HEVC: VPS/SPS/PPS, H.264: SPS/PPS)
             if isKeyFrame, let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
@@ -136,7 +136,7 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
                             parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil
                         )
                         if s == noErr, let p = paramPointer {
-                            withUnsafeBytes(of: startCode) { annexBData.append(contentsOf: $0) }
+                            annexBData.append(startCodeData)
                             annexBData.append(p, count: paramSize)
                         }
                     }
@@ -157,7 +157,7 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
                             parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil
                         )
                         if s == noErr, let p = paramPointer {
-                            withUnsafeBytes(of: startCode) { annexBData.append(contentsOf: $0) }
+                            annexBData.append(startCodeData)
                             annexBData.append(p, count: paramSize)
                         }
                     }
@@ -171,7 +171,7 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
                 let nalLength = Int(raw.loadUnaligned(fromByteOffset: offset, as: UInt32.self).bigEndian)
                 offset += 4
                 guard offset + nalLength <= totalLength else { break }
-                withUnsafeBytes(of: startCode) { annexBData.append(contentsOf: $0) }
+                annexBData.append(startCodeData)
                 annexBData.append(UnsafeBufferPointer(
                     start: raw.advanced(by: offset).assumingMemoryBound(to: UInt8.self),
                     count: nalLength
@@ -216,9 +216,9 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
         // Configure session properties for ultra-low-latency encoding
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: 50_000_000 as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 300 as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 5.0 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: 100_000_000 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 120 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 2.0 as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: config.refreshRate as CFNumber)
         let profileLevel: CFString = config.codec == .hevc
             ? kVTProfileLevel_HEVC_Main_AutoLevel
@@ -226,7 +226,7 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel,
                            value: profileLevel)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality, value: kCFBooleanTrue)
-        let dataRateLimits: [Int] = [6_250_000, 1] // 50 Mbps cap
+        let dataRateLimits: [Int] = [12_500_000, 1] // 100 Mbps cap
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits as CFArray)
 
         VTCompressionSessionPrepareToEncodeFrames(session)
@@ -291,7 +291,10 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
             infoFlagsOut: nil
         )
 
-        sem.wait()
+        let waitResult = sem.wait(timeout: .now() + 2.0)
+        if waitResult == .timedOut {
+            throw VideoEncoderError.encodingFailed(-1)
+        }
 
         guard let result = encodeResult else {
             throw VideoEncoderError.noDataReturned

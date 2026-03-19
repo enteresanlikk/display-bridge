@@ -221,14 +221,14 @@ class USBAccessoryTransport(
                             continue
                         }
 
-                        // Handle ERROR at transport level — break receive loop
+                        // Handle DISCONNECT/ERROR at transport level — break receive loop
                         // immediately so onComplete fires and triggers session cleanup.
                         // This is critical for USB: f_accessory read() blocks forever
                         // when the cable stays connected after server shutdown.
-                        if (packetType == PacketType.ERROR) {
-                            Log.i(TAG, "Received ERROR packet from server — stopping receive loop")
+                        if (packetType == PacketType.DISCONNECT || packetType == PacketType.ERROR) {
+                            Log.i(TAG, "Received ${packetType.name} packet from server — stopping receive loop")
                             packetQueue.put(fullPacket) // let ClientSession handle the message
-                            // Give process thread a moment to handle the ERROR packet
+                            // Give process thread a moment to handle the packet
                             Thread.sleep(100)
                             connected = false
                             break

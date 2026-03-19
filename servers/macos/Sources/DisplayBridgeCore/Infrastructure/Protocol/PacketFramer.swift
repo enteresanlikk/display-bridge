@@ -9,6 +9,7 @@ public enum PacketType: UInt8, Sendable {
     case configUpdate = 0x05
     case ping         = 0x06
     case pong         = 0x07
+    case disconnect   = 0x08
     case error        = 0xFF
 }
 
@@ -51,15 +52,15 @@ public enum PacketFramer {
 
         // Sequence number (8 bytes, LE)
         var seqLE = sequenceNumber.littleEndian
-        header.append(Data(bytes: &seqLE, count: 8))
+        withUnsafeBytes(of: &seqLE) { header.append(contentsOf: $0) }
 
         // Timestamp (8 bytes, LE)
         var tsLE = timestamp.littleEndian
-        header.append(Data(bytes: &tsLE, count: 8))
+        withUnsafeBytes(of: &tsLE) { header.append(contentsOf: $0) }
 
         // Payload length (4 bytes, LE)
         var lenLE = UInt32(payload.count).littleEndian
-        header.append(Data(bytes: &lenLE, count: 4))
+        withUnsafeBytes(of: &lenLE) { header.append(contentsOf: $0) }
 
         // Payload
         header.append(payload)
@@ -74,9 +75,9 @@ public enum PacketFramer {
             throw PacketFramerError.insufficientData(expected: headerSize, actual: data.count)
         }
 
-        // Validate magic
-        let magicBytes = [UInt8](data[data.startIndex..<data.startIndex + 4])
-        guard magicBytes == magic else {
+        // Validate magic (zero-allocation byte comparison)
+        let s = data.startIndex
+        guard data[s] == 0x44, data[s+1] == 0x42, data[s+2] == 0x52, data[s+3] == 0x47 else {
             throw PacketFramerError.invalidMagic
         }
 
@@ -105,7 +106,40 @@ public enum PacketFramer {
 
         let payload = data[data.startIndex + headerSize..<data.startIndex + headerSize + payloadLength]
 
-        return (packetType, sequenceNumber, timestamp, Data(payload))
+        return (packetType, sequenceNumber, timestamp, payload)
+    }
+
+    // MARK: - Packet extraction from buffer
+
+    /// Maximum allowed payload size (16 MB). Packets exceeding this are rejected.
+    private static let maxPayloadSize = 16 * 1024 * 1024
+
+    /// Extracts complete packets from a receive buffer, removing consumed bytes.
+    /// Resets the buffer on invalid magic or oversized payload.
+    public static func extractPackets(from buffer: inout Data) -> [Data] {
+        var packets: [Data] = []
+        while buffer.count >= headerSize {
+            let s = buffer.startIndex
+            guard buffer[s] == 0x44, buffer[s+1] == 0x42,
+                  buffer[s+2] == 0x52, buffer[s+3] == 0x47 else {
+                buffer.removeAll()
+                break
+            }
+            let payloadLength = Int(
+                buffer[(s+24)..<(s+28)]
+                    .withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
+                    .littleEndian
+            )
+            guard payloadLength >= 0, payloadLength <= maxPayloadSize else {
+                buffer.removeAll()
+                break
+            }
+            let total = headerSize + payloadLength
+            guard buffer.count >= total else { break }
+            packets.append(Data(buffer.prefix(total)))
+            buffer.removeFirst(total)
+        }
+        return packets
     }
 
     // MARK: - Video frame helpers

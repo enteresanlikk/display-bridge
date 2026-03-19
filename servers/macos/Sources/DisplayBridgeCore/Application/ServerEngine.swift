@@ -225,8 +225,17 @@ public final class ServerEngine: @unchecked Sendable {
 
     // MARK: - Client Handling
 
+    /// Maximum number of concurrent clients. Each client creates a VirtualDisplay + encoder.
+    private static let maxClients = 4
+
     private func handleClient(transport: any DataTransporting, clientID: UUID, defaultConfig: DeviceConfig, transportType: String) async {
         let shortID = clientID.uuidString.prefix(8)
+
+        guard activeClients.count < ServerEngine.maxClients else {
+            print("[Server] Max clients (\(ServerEngine.maxClients)) reached, rejecting \(shortID)")
+            await transport.disconnect()
+            return
+        }
 
         let vdm = VirtualDisplayManager()
         let capturer = ScreenCapturer(virtualDisplayID: CGMainDisplayID())

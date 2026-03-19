@@ -121,20 +121,11 @@ public final class ScreenCapturer: NSObject, DisplayCapturing, SCStreamOutput, @
 
     // MARK: - SCStreamOutput
 
-    private var _frameCallbackCount: Int = 0
-
     public func stream(
         _ stream: SCStream,
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of type: SCStreamOutputType
     ) {
-        _frameCallbackCount += 1
-        if _frameCallbackCount <= 3 || _frameCallbackCount % 300 == 0 {
-            let hasHandler = handler != nil
-            let hasImage = sampleBuffer.imageBuffer != nil
-            print("[ScreenCapturer] frame #\(_frameCallbackCount) hasImage=\(hasImage) hasHandler=\(hasHandler)")
-        }
-
         guard type == .screen else { return }
         guard sampleBuffer.isValid else { return }
         guard let handler = handler else { return }

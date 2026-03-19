@@ -8,6 +8,7 @@ enum class PacketType(val value: Byte) {
     CONFIG_UPDATE(0x05),
     PING(0x06),
     PONG(0x07),
+    DISCONNECT(0x08),
     ERROR(0xFF.toByte());
 
     companion object {

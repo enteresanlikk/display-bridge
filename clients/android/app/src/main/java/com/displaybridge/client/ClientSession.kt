@@ -170,6 +170,11 @@ class ClientSession(
                 }
             }
 
+            PacketType.DISCONNECT -> {
+                Log.i(TAG, "Server disconnected gracefully")
+                stop()
+            }
+
             PacketType.ERROR -> {
                 val errorMsg = if (packet.payload.isNotEmpty()) {
                     String(packet.payload, Charsets.UTF_8)
@@ -178,9 +183,6 @@ class ClientSession(
                 }
                 Log.e(TAG, "Server error: $errorMsg")
                 listener?.onError(errorMsg)
-                // Server is shutting down — stop session so Android cleans up
-                // and returns to connection screen (especially important for USB
-                // where f_accessory read() blocks forever on cable disconnect)
                 stop()
             }
 
