@@ -323,14 +323,8 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
     override fun onDisconnected(reason: String) {
         runOnUiThread {
             Log.i(TAG, "Disconnected: $reason")
-            Toast.makeText(this, "Disconnected: $reason", Toast.LENGTH_LONG).show()
-            if (isUSBAccessory) {
-                // Finish the activity so the next USB connect triggers a fresh
-                // accessory intent and clean Activity launch. Keeping a stale fd
-                // causes subsequent connections to fail (pkts=1, no data).
-                Log.i(TAG, "USB Accessory mode — finishing activity for clean reconnect")
-                finish()
-            }
+            Toast.makeText(this, "Disconnected", Toast.LENGTH_SHORT).show()
+            finish()
         }
     }
 
@@ -338,6 +332,7 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
         runOnUiThread {
             Log.e(TAG, "Error: $message")
             Toast.makeText(this, "Error: $message", Toast.LENGTH_LONG).show()
+            finish()
         }
     }
 }
