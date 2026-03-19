@@ -213,6 +213,19 @@ public actor SessionCoordinator {
 
         await capturer.stopCapture()
         await encoder.flush()
+
+        // Send explicit disconnect notification before closing transport.
+        // Critical for USB AOA: Android's f_accessory read() blocks forever
+        // when the cable stays connected, so the client can't detect disconnect
+        // without an explicit packet.
+        let errorPacket = PacketFramer.createPacket(
+            type: .error,
+            sequenceNumber: 0,
+            timestamp: currentTimestampMicros(),
+            payload: Data("server_shutdown".utf8)
+        )
+        try? await transport.send(errorPacket)
+
         await transport.disconnect()
 
         session?.transition(to: .disconnected)

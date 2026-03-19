@@ -178,6 +178,10 @@ class ClientSession(
                 }
                 Log.e(TAG, "Server error: $errorMsg")
                 listener?.onError(errorMsg)
+                // Server is shutting down — stop session so Android cleans up
+                // and returns to connection screen (especially important for USB
+                // where f_accessory read() blocks forever on cable disconnect)
+                stop()
             }
 
             else -> {
