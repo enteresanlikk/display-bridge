@@ -116,8 +116,7 @@ let config = DeviceConfig(
     width: args.width,
     height: args.height,
     refreshRate: args.refreshRate,
-    codec: .hevc,
-    colorSpace: .p3
+    codec: .hevc
 )
 
 let engine = ServerEngine(port: args.port)

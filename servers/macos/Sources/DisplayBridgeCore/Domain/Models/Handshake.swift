@@ -7,7 +7,6 @@ public struct HandshakeRequest: Codable, Sendable {
     public let screenHeight: Int
     public let refreshRate: Int
     public let supportedCodecs: [String]
-    public let colorSpaces: [String]?
     public let protocolVersion: Int
 
     public init(
@@ -16,7 +15,6 @@ public struct HandshakeRequest: Codable, Sendable {
         screenHeight: Int,
         refreshRate: Int,
         supportedCodecs: [String],
-        colorSpaces: [String]? = nil,
         protocolVersion: Int = 1
     ) {
         self.clientPlatform = clientPlatform
@@ -24,7 +22,6 @@ public struct HandshakeRequest: Codable, Sendable {
         self.screenHeight = screenHeight
         self.refreshRate = refreshRate
         self.supportedCodecs = supportedCodecs
-        self.colorSpaces = colorSpaces
         self.protocolVersion = protocolVersion
     }
 }
@@ -37,7 +34,6 @@ public struct HandshakeAck: Codable, Sendable {
     public let negotiatedRefreshRate: Int
     public let codec: String
     public let bitrate: Int
-    public let colorSpace: String?
     public let protocolVersion: Int
 
     public init(
@@ -47,7 +43,6 @@ public struct HandshakeAck: Codable, Sendable {
         negotiatedRefreshRate: Int,
         codec: String,
         bitrate: Int,
-        colorSpace: String? = nil,
         protocolVersion: Int = 1
     ) {
         self.accepted = accepted
@@ -56,7 +51,6 @@ public struct HandshakeAck: Codable, Sendable {
         self.negotiatedRefreshRate = negotiatedRefreshRate
         self.codec = codec
         self.bitrate = bitrate
-        self.colorSpace = colorSpace
         self.protocolVersion = protocolVersion
     }
 }

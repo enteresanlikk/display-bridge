@@ -22,7 +22,7 @@ import androidx.appcompat.app.AppCompatActivity
 /**
  * Settings screen for DisplayBridge.
  *
- * Allows the user to configure host, port, codec, color space,
+ * Allows the user to configure host, port, codec,
  * and optional resolution override before connecting.
  * All settings are persisted via SharedPreferences.
  */
@@ -33,7 +33,6 @@ class ConnectionActivity : AppCompatActivity() {
         private const val KEY_HOST = "host"
         private const val KEY_PORT = "port"
         private const val KEY_CODEC = "codec"
-        private const val KEY_COLOR_SPACE = "colorSpace"
         private const val KEY_OVERRIDE_RES = "overrideResolution"
         private const val KEY_WIDTH = "overrideWidth"
         private const val KEY_HEIGHT = "overrideHeight"
@@ -44,8 +43,6 @@ class ConnectionActivity : AppCompatActivity() {
     private lateinit var portInput: EditText
     private lateinit var codecHevc: RadioButton
     private lateinit var codecH264: RadioButton
-    private lateinit var colorSrgb: RadioButton
-    private lateinit var colorP3: RadioButton
     private lateinit var overrideCheckbox: CheckBox
     private lateinit var widthInput: EditText
     private lateinit var heightInput: EditText
@@ -125,18 +122,6 @@ class ConnectionActivity : AppCompatActivity() {
         val savedCodec = prefs.getString(KEY_CODEC, "hevc")
         if (savedCodec == "h264") codecH264.isChecked = true else codecHevc.isChecked = true
         content.addView(codecGroup, lp(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(8) })
-
-        content.addView(label("Color Space"))
-        val colorGroup = RadioGroup(this).apply {
-            orientation = RadioGroup.HORIZONTAL
-        }
-        colorSrgb = radioButton("sRGB")
-        colorP3 = radioButton("Display P3")
-        colorGroup.addView(colorSrgb)
-        colorGroup.addView(colorP3)
-        val savedColor = prefs.getString(KEY_COLOR_SPACE, "srgb")
-        if (savedColor == "p3") colorP3.isChecked = true else colorSrgb.isChecked = true
-        content.addView(colorGroup, lp(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(8) })
 
         // --- Display Section ---
         content.addView(sectionHeader("Display").apply { topMargin(dp(20)) })
@@ -280,7 +265,6 @@ class ConnectionActivity : AppCompatActivity() {
         prefs.putString(KEY_HOST, hostInput.text.toString().ifBlank { "127.0.0.1" })
         prefs.putInt(KEY_PORT, portInput.text.toString().toIntOrNull() ?: 7878)
         prefs.putString(KEY_CODEC, if (codecH264.isChecked) "h264" else "hevc")
-        prefs.putString(KEY_COLOR_SPACE, if (colorP3.isChecked) "p3" else "srgb")
         prefs.putBoolean(KEY_OVERRIDE_RES, overrideCheckbox.isChecked)
         prefs.putInt(KEY_WIDTH, widthInput.text.toString().toIntOrNull() ?: 0)
         prefs.putInt(KEY_HEIGHT, heightInput.text.toString().toIntOrNull() ?: 0)
@@ -293,7 +277,6 @@ class ConnectionActivity : AppCompatActivity() {
         val host = hostInput.text.toString().ifBlank { "127.0.0.1" }
         val port = portInput.text.toString().toIntOrNull() ?: 7878
         val codec = if (codecH264.isChecked) "h264" else "hevc"
-        val colorSpace = if (colorP3.isChecked) "p3" else "srgb"
         val overrideWidth = if (overrideCheckbox.isChecked) (widthInput.text.toString().toIntOrNull() ?: 0) else 0
         val overrideHeight = if (overrideCheckbox.isChecked) (heightInput.text.toString().toIntOrNull() ?: 0) else 0
 
@@ -301,7 +284,6 @@ class ConnectionActivity : AppCompatActivity() {
             putExtra("host", host)
             putExtra("port", port)
             putExtra("codec", codec)
-            putExtra("colorSpace", colorSpace)
             putExtra("overrideWidth", overrideWidth)
             putExtra("overrideHeight", overrideHeight)
         }

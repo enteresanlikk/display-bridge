@@ -7,7 +7,6 @@ data class DeviceConfig(
     val height: Int,
     val refreshRate: Int,
     val codec: String = "hevc",
-    val colorSpace: String = "srgb",
     val deviceName: String? = null
 ) {
     fun toJson(): String {
@@ -16,7 +15,6 @@ data class DeviceConfig(
         json.put("height", height)
         json.put("refreshRate", refreshRate)
         json.put("codec", codec)
-        json.put("colorSpace", colorSpace)
         if (deviceName != null) {
             json.put("deviceName", deviceName)
         }
@@ -31,7 +29,6 @@ data class DeviceConfig(
                 height = obj.getInt("height"),
                 refreshRate = obj.getInt("refreshRate"),
                 codec = obj.optString("codec", "hevc"),
-                colorSpace = obj.optString("colorSpace", "srgb"),
                 deviceName = if (obj.has("deviceName")) obj.getString("deviceName") else null
             )
         }

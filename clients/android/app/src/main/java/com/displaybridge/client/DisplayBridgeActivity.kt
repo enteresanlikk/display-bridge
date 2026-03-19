@@ -45,7 +45,6 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
     private var settingsHost = "127.0.0.1"
     private var settingsPort = 7878
     private var settingsCodec = "hevc"
-    private var settingsColorSpace = "srgb"
     private var settingsOverrideWidth = 0
     private var settingsOverrideHeight = 0
 
@@ -88,10 +87,9 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
                 return
             }
 
-            // Load codec/colorSpace from SharedPreferences (port/host not needed for USB)
+            // Load codec from SharedPreferences (port/host not needed for USB)
             val prefs = getSharedPreferences("displaybridge_settings", Context.MODE_PRIVATE)
             settingsCodec = prefs.getString("codec", "hevc") ?: "hevc"
-            settingsColorSpace = prefs.getString("colorSpace", "srgb") ?: "srgb"
             settingsOverrideWidth = prefs.getInt("overrideWidth", 0)
             settingsOverrideHeight = prefs.getInt("overrideHeight", 0)
             if (!prefs.getBoolean("overrideResolution", false)) {
@@ -105,7 +103,6 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
             settingsHost = intent.getStringExtra("host") ?: "127.0.0.1"
             settingsPort = intent.getIntExtra("port", 7878)
             settingsCodec = intent.getStringExtra("codec") ?: "hevc"
-            settingsColorSpace = intent.getStringExtra("colorSpace") ?: "srgb"
             settingsOverrideWidth = intent.getIntExtra("overrideWidth", 0)
             settingsOverrideHeight = intent.getIntExtra("overrideHeight", 0)
 
@@ -244,7 +241,6 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
             height = height,
             refreshRate = refreshRate,
             codec = settingsCodec,
-            colorSpace = settingsColorSpace,
             deviceName = Build.MODEL
         )
     }

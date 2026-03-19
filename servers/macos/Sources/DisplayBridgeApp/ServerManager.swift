@@ -73,8 +73,7 @@ final class ServerManager: ObservableObject {
             width: 2960,
             height: 1848,
             refreshRate: 120,
-            codec: .hevc,
-            colorSpace: .p3
+            codec: .hevc
         )
 
         await eng.start(defaultConfig: config)
