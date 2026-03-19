@@ -124,7 +124,7 @@ public final class ServerEngine: @unchecked Sendable {
     public private(set) var port: UInt16
 
     // Callbacks — GUI uses these to update state
-    public var onClientConnected: (@Sendable (UUID, String, String) -> Void)?
+    public var onClientConnected: (@Sendable (UUID, String, String, Int, Int, Int) -> Void)?
     public var onClientDisconnected: (@Sendable (UUID) -> Void)?
     public var onClientStatsUpdated: (@Sendable (UUID, ClientStats) -> Void)?
     public var onStateChanged: (@Sendable (Bool) -> Void)?
@@ -268,7 +268,7 @@ public final class ServerEngine: @unchecked Sendable {
                     pipelineReady.value = true
 
                     self?.activeClients.updateDeviceName(clientID, name: deviceName)
-                    self?.onClientConnected?(clientID, deviceName, transportType)
+                    self?.onClientConnected?(clientID, deviceName, transportType, clientConfig.width, clientConfig.height, clientConfig.refreshRate)
                 } else {
                     newID = try vdm.recreate(config: clientConfig, deviceName: deviceName)
                     print("[Client \(shortID)] Virtual display recreated: \(deviceName) (ID: \(newID))")

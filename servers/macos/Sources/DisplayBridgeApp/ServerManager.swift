@@ -15,6 +15,9 @@ final class ServerManager: ObservableObject {
         let id: UUID
         let deviceName: String
         let transportType: String  // "USB" or "Network"
+        let width: Int
+        let height: Int
+        let refreshRate: Int
         var sentFPS: Double = 0
         var avgLatencyMs: Double = 0
         var droppedPercent: Double = 0
@@ -33,10 +36,10 @@ final class ServerManager: ObservableObject {
             }
         }
 
-        eng.onClientConnected = { [weak self] clientID, deviceName, transportType in
+        eng.onClientConnected = { [weak self] clientID, deviceName, transportType, width, height, refreshRate in
             guard let self else { return }
             Task { @MainActor in
-                let info = ClientInfo(id: clientID, deviceName: deviceName, transportType: transportType)
+                let info = ClientInfo(id: clientID, deviceName: deviceName, transportType: transportType, width: width, height: height, refreshRate: refreshRate)
                 self.connectedClients.append(info)
             }
         }
