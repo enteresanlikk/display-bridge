@@ -10,7 +10,17 @@ let package = Package(
         .executable(name: "DisplayBridgeApp", targets: ["DisplayBridgeApp"]),
     ],
     targets: [
-        .target(name: "DisplayBridgeCore"),
+        .target(
+            name: "CUSBKit",
+            linkerSettings: [
+                .linkedFramework("IOKit"),
+                .linkedFramework("CoreFoundation"),
+            ]
+        ),
+        .target(
+            name: "DisplayBridgeCore",
+            dependencies: ["CUSBKit"]
+        ),
         .executableTarget(name: "DisplayBridgeCLI", dependencies: ["DisplayBridgeCore"]),
         .executableTarget(name: "DisplayBridgeApp", dependencies: ["DisplayBridgeCore"]),
     ]

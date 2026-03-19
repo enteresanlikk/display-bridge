@@ -40,8 +40,6 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
     private var surfaceView: DisplaySurfaceView? = null
     private var container: FrameLayout? = null
     private var currentConfig: DeviceConfig? = null
-    private var debugOverlay: android.widget.TextView? = null
-    private var debugHandler: android.os.Handler? = null
 
     // Settings from intent extras (set by ConnectionActivity)
     private var settingsHost = "127.0.0.1"
@@ -128,31 +126,6 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
 
         setupSession()
 
-        // USB debug overlay — shows transport status on screen
-        if (isUSBAccessory) {
-            val tv = android.widget.TextView(this).apply {
-                setTextColor(android.graphics.Color.YELLOW)
-                textSize = 14f
-                setBackgroundColor(android.graphics.Color.argb(128, 0, 0, 0))
-                setPadding(16, 8, 16, 8)
-            }
-            frameLayout.addView(tv, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
-            ).apply { gravity = android.view.Gravity.TOP or android.view.Gravity.START })
-            debugOverlay = tv
-
-            val handler = android.os.Handler(mainLooper)
-            debugHandler = handler
-            val updateRunnable = object : Runnable {
-                override fun run() {
-                    val usbT = transport as? USBAccessoryTransport
-                    tv.text = "USB: ${usbT?.debugStatus ?: "?"} | pkts=${usbT?.debugPacketCount} bytes=${usbT?.debugByteCount}"
-                    handler.postDelayed(this, 500)
-                }
-            }
-            handler.postDelayed(updateRunnable, 500)
-        }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -354,8 +327,14 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
     override fun onDisconnected(reason: String) {
         runOnUiThread {
             Log.i(TAG, "Disconnected: $reason")
-            Toast.makeText(this, "Disconnected: $reason", Toast.LENGTH_SHORT).show()
-            finish()
+            Toast.makeText(this, "Disconnected: $reason", Toast.LENGTH_LONG).show()
+            if (isUSBAccessory) {
+                // Finish the activity so the next USB connect triggers a fresh
+                // accessory intent and clean Activity launch. Keeping a stale fd
+                // causes subsequent connections to fail (pkts=1, no data).
+                Log.i(TAG, "USB Accessory mode — finishing activity for clean reconnect")
+                finish()
+            }
         }
     }
 

@@ -110,14 +110,33 @@ struct ContentView: View {
                     VStack(spacing: 0) {
                         ForEach(serverManager.connectedClients) { client in
                             HStack {
-                                Image(systemName: "iphone")
-                                    .foregroundStyle(.blue)
+                                Image(systemName: client.transportType == "USB" ? "cable.connector" : "wifi")
+                                    .foregroundStyle(client.transportType == "USB" ? .orange : .blue)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(client.deviceName)
-                                        .font(.body)
-                                    Text(client.connectedAt, style: .relative)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                    HStack(spacing: 6) {
+                                        Text(client.deviceName)
+                                            .font(.body)
+                                        Text(client.transportType)
+                                            .font(.caption2.bold())
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 1)
+                                            .background(client.transportType == "USB" ? Color.orange.opacity(0.2) : Color.blue.opacity(0.2))
+                                            .foregroundStyle(client.transportType == "USB" ? .orange : .blue)
+                                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                                    }
+                                    HStack(spacing: 8) {
+                                        Text(client.connectedAt, style: .relative)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        if client.sentFPS > 0 {
+                                            Text("\(Int(client.sentFPS)) fps")
+                                                .font(.caption.monospacedDigit())
+                                                .foregroundStyle(.green)
+                                            Text(String(format: "%.1fms", client.avgLatencyMs))
+                                                .font(.caption.monospacedDigit())
+                                                .foregroundStyle(client.avgLatencyMs < 8 ? .blue : .orange)
+                                        }
+                                    }
                                 }
                                 Spacer()
                                 Button(role: .destructive) {

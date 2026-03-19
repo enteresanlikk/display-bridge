@@ -134,6 +134,15 @@ object PacketFramer {
     }
 
     /**
+     * Reads the packet type from a raw packet without full parsing.
+     * Returns null if the data is too short.
+     */
+    fun peekPacketType(data: ByteArray): PacketType? {
+        if (data.size < 5) return null
+        return PacketType.fromValue(data[4])
+    }
+
+    /**
      * Creates a HANDSHAKE_REQ packet with the device configuration as JSON payload.
      */
     fun createHandshakeRequest(config: DeviceConfig): ByteArray {

@@ -151,7 +151,9 @@ class ClientSession(
             }
 
             PacketType.PING -> {
-                // Respond with PONG
+                // PONG is handled at the transport level for USB to avoid
+                // delays from video decoding blocking the receive thread.
+                // For TCP transport, respond here as fallback.
                 val pong = PacketFramer.createPong(packet.sequenceNumber, packet.timestamp)
                 try {
                     transport.send(pong)

@@ -117,14 +117,16 @@ public final class ServerEngine: @unchecked Sendable {
     private let activeClients = ActiveClients()
     private var listener: ConnectionListener?
     private var listenTask: Task<Void, Never>?
+    private var aoaManager: AOAManager?
     private let lock = NSLock()
 
     public private(set) var isRunning = false
     public private(set) var port: UInt16
 
     // Callbacks — GUI uses these to update state
-    public var onClientConnected: (@Sendable (UUID, String) -> Void)?
+    public var onClientConnected: (@Sendable (UUID, String, String) -> Void)?
     public var onClientDisconnected: (@Sendable (UUID) -> Void)?
+    public var onClientStatsUpdated: (@Sendable (UUID, ClientStats) -> Void)?
     public var onStateChanged: (@Sendable (Bool) -> Void)?
     public var onError: (@Sendable (String) -> Void)?
 
@@ -175,7 +177,7 @@ public final class ServerEngine: @unchecked Sendable {
                     print("[Server] TCP client \(shortID) connected. Active clients: \(self.activeClients.count + 1)")
 
                     let clientTask = Task {
-                        await self.handleClient(transport: clientConn, clientID: clientID, defaultConfig: defaultConfig)
+                        await self.handleClient(transport: clientConn, clientID: clientID, defaultConfig: defaultConfig, transportType: "Network")
                     }
                     self.activeClients.setTask(clientID, task: clientTask)
                 }
@@ -183,8 +185,30 @@ public final class ServerEngine: @unchecked Sendable {
         }
 
         if listenerReady {
+            // Start AOA USB monitoring alongside TCP
+            let aoa = AOAManager()
+            aoa.onAccessoryConnected = { [weak self] transport, clientID in
+                guard let self else { return }
+                let shortID = clientID.uuidString.prefix(8)
+                print("[Server] AOA client \(shortID) connected")
+
+                let clientTask = Task {
+                    await self.handleClient(transport: transport, clientID: clientID, defaultConfig: defaultConfig, transportType: "USB")
+                }
+                self.activeClients.setTask(clientID, task: clientTask)
+            }
+            aoa.onAccessoryDisconnected = { [weak self] clientID in
+                guard let self else { return }
+                let shortID = clientID.uuidString.prefix(8)
+                print("[Server] AOA client \(shortID) disconnected (USB removed)")
+                Task { await self.activeClients.disconnectClient(clientID) }
+                self.onClientDisconnected?(clientID)
+            }
+            aoa.start()
+            lock.withLock { aoaManager = aoa }
+
             onStateChanged?(true)
-            print("[ServerEngine] Server started on port \(port) (TCP)")
+            print("[ServerEngine] Server started on port \(port) (TCP + AOA USB)")
         } else {
             // Listener failed — clean up
             lock.withLock {
@@ -201,7 +225,7 @@ public final class ServerEngine: @unchecked Sendable {
 
     // MARK: - Client Handling
 
-    private func handleClient(transport: any DataTransporting, clientID: UUID, defaultConfig: DeviceConfig) async {
+    private func handleClient(transport: any DataTransporting, clientID: UUID, defaultConfig: DeviceConfig, transportType: String) async {
         let shortID = clientID.uuidString.prefix(8)
 
         let vdm = VirtualDisplayManager()
@@ -230,7 +254,7 @@ public final class ServerEngine: @unchecked Sendable {
                     pipelineReady.value = true
 
                     self?.activeClients.updateDeviceName(clientID, name: deviceName)
-                    self?.onClientConnected?(clientID, deviceName)
+                    self?.onClientConnected?(clientID, deviceName, transportType)
                 } else {
                     newID = try vdm.recreate(config: clientConfig, deviceName: deviceName)
                     print("[Client \(shortID)] Virtual display recreated: \(deviceName) (ID: \(newID))")
@@ -243,6 +267,9 @@ public final class ServerEngine: @unchecked Sendable {
                 // Only cache the display — actual capture starts in startStreamingPipeline
                 // with the handler already set (avoids SCStream idle frame issue)
                 try await capturer.preStart(config: clientConfig)
+            },
+            onStatsUpdated: { [weak self] stats in
+                self?.onClientStatsUpdated?(clientID, stats)
             }
         )
 
@@ -276,6 +303,14 @@ public final class ServerEngine: @unchecked Sendable {
         lstn?.stop()
         listenTask?.cancel()
         listenTask = nil
+
+        // Stop AOA USB monitoring
+        let aoa = lock.withLock { () -> AOAManager? in
+            let a = aoaManager
+            aoaManager = nil
+            return a
+        }
+        aoa?.stop()
 
         // stopAll cancels per-client tasks, stops coordinators, and destroys VDMs
         await activeClients.stopAll()

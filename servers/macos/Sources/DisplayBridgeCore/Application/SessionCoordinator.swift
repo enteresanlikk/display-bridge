@@ -140,15 +140,25 @@ private final class PipelineMetrics: @unchecked Sendable {
     }
 }
 
+public struct ClientStats: Sendable {
+    public let captureFPS: Double
+    public let sentFPS: Double
+    public let droppedPercent: Double
+    public let avgLatencyMs: Double
+    public let maxLatencyMs: Double
+}
+
 public actor SessionCoordinator {
     /// Called when the client handshake or config update arrives with its DeviceConfig.
     /// The handler should recreate VDM/encoder/capturer to match the client's resolution.
     public typealias ClientConfigHandler = @Sendable (DeviceConfig) async throws -> Void
+    public typealias StatsHandler = @Sendable (ClientStats) -> Void
 
     private let capturer: any DisplayCapturing
     private let encoder: any VideoEncoding
     private let transport: any DataTransporting
     private let onClientConfig: ClientConfigHandler?
+    private let onStatsUpdated: StatsHandler?
 
     private var session: DisplaySession?
     private var sequenceNumber: UInt64 = 0
@@ -161,12 +171,14 @@ public actor SessionCoordinator {
         capturer: any DisplayCapturing,
         encoder: any VideoEncoding,
         transport: any DataTransporting,
-        onClientConfig: ClientConfigHandler? = nil
+        onClientConfig: ClientConfigHandler? = nil,
+        onStatsUpdated: StatsHandler? = nil
     ) {
         self.capturer = capturer
         self.encoder = encoder
         self.transport = transport
         self.onClientConfig = onClientConfig
+        self.onStatsUpdated = onStatsUpdated
     }
 
     public var currentState: SessionState {
@@ -359,9 +371,24 @@ public actor SessionCoordinator {
                 if let s = metrics?.snapshot() {
                     print(String(format: "[STATS] capture=%.0ffps sent=%.0ffps | drop=%.0f%% | latency avg=%.1fms max=%.1fms",
                                  s.captureFPS, s.sentFPS, s.droppedPercent, s.avgLatencyMs, s.maxLatencyMs))
+                    self?.onStatsUpdated?(ClientStats(
+                        captureFPS: s.captureFPS, sentFPS: s.sentFPS,
+                        droppedPercent: s.droppedPercent,
+                        avgLatencyMs: s.avgLatencyMs, maxLatencyMs: s.maxLatencyMs
+                    ))
                 }
 
-                // Send PING
+                // Check if client is alive BEFORE attempting to send PING.
+                // This ensures the dead timeout works even if the write queue is
+                // blocked by a slow USB video write.
+                guard let lastTime = await self?.lastReceivedTime else { break }
+                let now = DispatchTime.now().uptimeNanoseconds
+                if now - lastTime > deadTimeout {
+                    print("[SessionCoordinator] Client heartbeat timeout — no response for \(deadTimeout / 1_000_000_000)s")
+                    break
+                }
+
+                // Send PING (best-effort — don't break on failure)
                 let seq = await self?.nextSequenceNumber() ?? 0
                 let ts = await self?.currentTimestampMicros() ?? 0
                 let ping = PacketFramer.createPacket(
@@ -374,15 +401,6 @@ public actor SessionCoordinator {
                     try await transport.send(ping)
                 } catch {
                     print("[SessionCoordinator] Heartbeat send failed: \(error)")
-                    break
-                }
-
-                // Check if client is alive
-                guard let lastTime = await self?.lastReceivedTime else { break }
-                let now = DispatchTime.now().uptimeNanoseconds
-                if now - lastTime > deadTimeout {
-                    print("[SessionCoordinator] Client heartbeat timeout — no response for \(deadTimeout / 1_000_000_000)s")
-                    break
                 }
             }
 

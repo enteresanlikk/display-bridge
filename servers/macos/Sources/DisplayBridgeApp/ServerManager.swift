@@ -14,7 +14,11 @@ final class ServerManager: ObservableObject {
     struct ClientInfo: Identifiable {
         let id: UUID
         let deviceName: String
+        let transportType: String  // "USB" or "Network"
         let connectedAt: Date
+        var sentFPS: Double = 0
+        var avgLatencyMs: Double = 0
+        var droppedPercent: Double = 0
     }
 
     func startServer() async {
@@ -30,10 +34,10 @@ final class ServerManager: ObservableObject {
             }
         }
 
-        eng.onClientConnected = { [weak self] clientID, deviceName in
+        eng.onClientConnected = { [weak self] clientID, deviceName, transportType in
             guard let self else { return }
             Task { @MainActor in
-                let info = ClientInfo(id: clientID, deviceName: deviceName, connectedAt: Date())
+                let info = ClientInfo(id: clientID, deviceName: deviceName, transportType: transportType, connectedAt: Date())
                 self.connectedClients.append(info)
             }
         }
@@ -42,6 +46,17 @@ final class ServerManager: ObservableObject {
             guard let self else { return }
             Task { @MainActor in
                 self.connectedClients.removeAll { $0.id == clientID }
+            }
+        }
+
+        eng.onClientStatsUpdated = { [weak self] clientID, stats in
+            guard let self else { return }
+            Task { @MainActor in
+                if let idx = self.connectedClients.firstIndex(where: { $0.id == clientID }) {
+                    self.connectedClients[idx].sentFPS = stats.sentFPS
+                    self.connectedClients[idx].avgLatencyMs = stats.avgLatencyMs
+                    self.connectedClients[idx].droppedPercent = stats.droppedPercent
+                }
             }
         }
 
