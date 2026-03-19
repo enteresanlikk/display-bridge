@@ -124,7 +124,7 @@ struct ContentView: View {
                                             .foregroundStyle(client.transportType == "USB" ? .orange : .blue)
                                             .clipShape(RoundedRectangle(cornerRadius: 3))
                                     }
-                                    Text("\(client.width)x\(client.height) @ \(client.refreshRate)Hz")
+                                    Text(verbatim: "\(client.width)x\(client.height) @ \(client.refreshRate)Hz")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                     if client.sentFPS > 0 {

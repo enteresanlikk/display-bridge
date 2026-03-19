@@ -33,6 +33,7 @@ class ConnectionActivity : AppCompatActivity() {
         private const val KEY_HOST = "host"
         private const val KEY_PORT = "port"
         private const val KEY_CODEC = "codec"
+        private const val KEY_FPS = "overrideFps"
         private const val KEY_OVERRIDE_RES = "overrideResolution"
         private const val KEY_WIDTH = "overrideWidth"
         private const val KEY_HEIGHT = "overrideHeight"
@@ -43,6 +44,7 @@ class ConnectionActivity : AppCompatActivity() {
     private lateinit var portInput: EditText
     private lateinit var codecHevc: RadioButton
     private lateinit var codecH264: RadioButton
+    private lateinit var fpsSpinner: Spinner
     private lateinit var overrideCheckbox: CheckBox
     private lateinit var widthInput: EditText
     private lateinit var heightInput: EditText
@@ -122,6 +124,20 @@ class ConnectionActivity : AppCompatActivity() {
         val savedCodec = prefs.getString(KEY_CODEC, "hevc")
         if (savedCodec == "h264") codecH264.isChecked = true else codecHevc.isChecked = true
         content.addView(codecGroup, lp(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(8) })
+
+        content.addView(label("Frame Rate"))
+        val fpsOptions = arrayOf("Auto", "30", "60", "120")
+        val fpsValues = intArrayOf(0, 30, 60, 120)
+        fpsSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@ConnectionActivity, android.R.layout.simple_spinner_dropdown_item, fpsOptions).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            setBackgroundColor(Color.parseColor("#2A2A4A"))
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        val savedFps = prefs.getInt(KEY_FPS, 0)
+        fpsSpinner.setSelection(fpsValues.indexOf(savedFps).coerceAtLeast(0))
+        content.addView(fpsSpinner, lp(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(8) })
 
         // --- Display Section ---
         content.addView(sectionHeader("Display").apply { topMargin(dp(20)) })
@@ -265,6 +281,8 @@ class ConnectionActivity : AppCompatActivity() {
         prefs.putString(KEY_HOST, hostInput.text.toString().ifBlank { "127.0.0.1" })
         prefs.putInt(KEY_PORT, portInput.text.toString().toIntOrNull() ?: 7878)
         prefs.putString(KEY_CODEC, if (codecH264.isChecked) "h264" else "hevc")
+        val fpsValues = intArrayOf(0, 30, 60, 120)
+        prefs.putInt(KEY_FPS, fpsValues.getOrElse(fpsSpinner.selectedItemPosition) { 0 })
         prefs.putBoolean(KEY_OVERRIDE_RES, overrideCheckbox.isChecked)
         prefs.putInt(KEY_WIDTH, widthInput.text.toString().toIntOrNull() ?: 0)
         prefs.putInt(KEY_HEIGHT, heightInput.text.toString().toIntOrNull() ?: 0)
@@ -277,6 +295,8 @@ class ConnectionActivity : AppCompatActivity() {
         val host = hostInput.text.toString().ifBlank { "127.0.0.1" }
         val port = portInput.text.toString().toIntOrNull() ?: 7878
         val codec = if (codecH264.isChecked) "h264" else "hevc"
+        val fpsValues = intArrayOf(0, 30, 60, 120)
+        val overrideFps = fpsValues.getOrElse(fpsSpinner.selectedItemPosition) { 0 }
         val overrideWidth = if (overrideCheckbox.isChecked) (widthInput.text.toString().toIntOrNull() ?: 0) else 0
         val overrideHeight = if (overrideCheckbox.isChecked) (heightInput.text.toString().toIntOrNull() ?: 0) else 0
 
@@ -284,6 +304,7 @@ class ConnectionActivity : AppCompatActivity() {
             putExtra("host", host)
             putExtra("port", port)
             putExtra("codec", codec)
+            putExtra("overrideFps", overrideFps)
             putExtra("overrideWidth", overrideWidth)
             putExtra("overrideHeight", overrideHeight)
         }

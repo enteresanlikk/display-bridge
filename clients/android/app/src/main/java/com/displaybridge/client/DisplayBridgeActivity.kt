@@ -45,6 +45,7 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
     private var settingsHost = "127.0.0.1"
     private var settingsPort = 7878
     private var settingsCodec = "hevc"
+    private var settingsOverrideFps = 0
     private var settingsOverrideWidth = 0
     private var settingsOverrideHeight = 0
 
@@ -90,6 +91,7 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
             // Load codec from SharedPreferences (port/host not needed for USB)
             val prefs = getSharedPreferences("displaybridge_settings", Context.MODE_PRIVATE)
             settingsCodec = prefs.getString("codec", "hevc") ?: "hevc"
+            settingsOverrideFps = prefs.getInt("overrideFps", 0)
             settingsOverrideWidth = prefs.getInt("overrideWidth", 0)
             settingsOverrideHeight = prefs.getInt("overrideHeight", 0)
             if (!prefs.getBoolean("overrideResolution", false)) {
@@ -103,6 +105,7 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
             settingsHost = intent.getStringExtra("host") ?: "127.0.0.1"
             settingsPort = intent.getIntExtra("port", 7878)
             settingsCodec = intent.getStringExtra("codec") ?: "hevc"
+            settingsOverrideFps = intent.getIntExtra("overrideFps", 0)
             settingsOverrideWidth = intent.getIntExtra("overrideWidth", 0)
             settingsOverrideHeight = intent.getIntExtra("overrideHeight", 0)
 
@@ -234,7 +237,7 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
         val height = if (settingsOverrideHeight > 0) settingsOverrideHeight else metrics.heightPixels
 
         @Suppress("DEPRECATION")
-        val refreshRate = windowManager.defaultDisplay.refreshRate.toInt()
+        val refreshRate = if (settingsOverrideFps > 0) settingsOverrideFps else windowManager.defaultDisplay.refreshRate.toInt()
 
         return DeviceConfig(
             width = width,
