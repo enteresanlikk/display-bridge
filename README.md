@@ -1,12 +1,11 @@
 # DisplayBridge
 
-Turns an Android device into a second monitor for macOS. Works over TCP via USB cable. Targets <8ms end-to-end latency at native resolution using hardware H.265 encoding.
+Turns an Android device into a second monitor for macOS. Works over USB (AOA direct) or TCP (Network / adb reverse). Targets <16ms end-to-end latency at native resolution using hardware H.265 encoding. Zero third-party dependencies.
 
 ## Requirements
 
 ### macOS Server
-- macOS 13+ (ScreenCaptureKit)
-- macOS 14+ (CGVirtualDisplay — virtual display)
+- macOS 14+ (CGVirtualDisplay, ScreenCaptureKit)
 - Swift 5.9+
 - Screen Recording permission (System Settings > Privacy > Screen Recording)
 
@@ -40,38 +39,45 @@ swift run DisplayBridgeApp     # Start as menu bar app
 swift run DisplayBridgeCLI --width 1920 --height 1080 --refresh-rate 60 --port 8080
 ```
 
-### 2. Android Connection
+### 2. Connection Methods
 
-Connect the Android device to Mac via USB and set up adb port forwarding:
+#### USB AOA (Direct — recommended)
+Connect the Android device to Mac via USB. The server automatically detects the device and initiates AOA (Android Open Accessory) mode — no adb required.
 
+#### USB via adb reverse (development only)
 ```bash
 adb reverse tcp:7878 tcp:7878
 ```
+Then open the Android client app and connect to `127.0.0.1:7878`. This method is primarily for development/debugging — use USB AOA for production.
 
-Then open the Android client app — it will connect automatically.
+#### Network
+Enter your Mac's IP address and port in the Android client app.
 
-### 3. WiFi Connection (alternative)
-
-You can also connect over WiFi without adb. Enter your Mac's IP address and port in the Android client.
+Both TCP and USB AOA transports run simultaneously — multiple clients can connect via different methods at the same time.
 
 ## Project Structure
 
 ```
 DisplayBridge/
 ├── servers/
-│   └── macos/          # macOS server (Swift, SPM)
+│   └── macos/              # macOS server (Swift, SPM)
 │       ├── Package.swift
 │       └── Sources/
-│           ├── DisplayBridgeCore/    # Core library
-│           ├── DisplayBridgeCLI/     # CLI app
-│           └── DisplayBridgeApp/     # Menu bar app
+│           ├── CUSBKit/           # IOKit USB C bridge
+│           ├── DisplayBridgeCore/ # Core library (Clean Architecture)
+│           ├── DisplayBridgeCLI/  # CLI app
+│           └── DisplayBridgeApp/  # SwiftUI menu bar app
 └── clients/
-    └── android/        # Android client (Kotlin)
+    └── android/            # Android client (Kotlin)
 ```
 
 ## Pipeline
 
 ```
 VirtualDisplay → ScreenCapturer (IOSurface) → VideoToolboxEncoder (H.265 HW)
-    → PacketFramer (28B header + NAL) → TCP Transport → Android Client
+    → PacketFramer (28B header + NAL) → Transport (TCP or USB AOA) → Android Client
 ```
+
+## License
+
+[MIT](LICENCE)
