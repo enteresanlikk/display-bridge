@@ -46,6 +46,81 @@ private final class PipelineGate: @unchecked Sendable {
     }
 }
 
+/// Thread-safe holder for the latest encoded frame ready to send.
+/// Encoder writes the latest; sender takes it. Overwrites any stale pending frame.
+private final class PendingFrame: @unchecked Sendable {
+    private var _lock = os_unfair_lock()
+    private var _packet: Data?
+    private var _captureTimeNs: UInt64 = 0
+
+    /// Store a new pending frame (overwrites any previous).
+    func set(packet: Data, captureTimeNs: UInt64) {
+        os_unfair_lock_lock(&_lock)
+        _packet = packet
+        _captureTimeNs = captureTimeNs
+        os_unfair_lock_unlock(&_lock)
+    }
+
+    /// Take the pending frame (clears it). Returns nil if nothing pending.
+    func take() -> (packet: Data, captureTimeNs: UInt64)? {
+        os_unfair_lock_lock(&_lock)
+        guard let p = _packet else {
+            os_unfair_lock_unlock(&_lock)
+            return nil
+        }
+        let ts = _captureTimeNs
+        _packet = nil
+        os_unfair_lock_unlock(&_lock)
+        return (p, ts)
+    }
+
+    /// Check if there's a pending frame without consuming it.
+    var hasPending: Bool {
+        os_unfair_lock_lock(&_lock)
+        defer { os_unfair_lock_unlock(&_lock) }
+        return _packet != nil
+    }
+}
+
+/// Self-driving send loop: when a send completes, immediately picks up the next
+/// pending encoded frame. This eliminates dead time between USB writes.
+private final class SendChain: @unchecked Sendable {
+    let pending: PendingFrame
+    let gate: PipelineGate
+    let transport: any DataTransporting
+    let metrics: PipelineMetrics
+
+    init(pending: PendingFrame, gate: PipelineGate, transport: any DataTransporting, metrics: PipelineMetrics) {
+        self.pending = pending
+        self.gate = gate
+        self.transport = transport
+        self.metrics = metrics
+    }
+
+    /// Send the pending frame. Gate must already be entered by caller.
+    func trySend() {
+        guard let (packet, captureNs) = pending.take() else {
+            gate.leave()
+            return
+        }
+
+        let packetSize = packet.count
+        transport.sendTracked(packet) { [self] in
+            let totalUs = (DispatchTime.now().uptimeNanoseconds - captureNs) / 1000
+            metrics.recordSent(latencyUs: totalUs, bytes: packetSize)
+
+            // Immediately try the next pending frame (zero gap between sends).
+            // During the USB write, the capture callback encoded a fresh frame
+            // into pending — send it without waiting for the next callback.
+            if pending.hasPending {
+                trySend()
+            } else {
+                gate.leave()
+            }
+        }
+    }
+}
+
 /// Tracks per-frame timing and computes periodic FPS / latency stats.
 private final class PipelineMetrics: @unchecked Sendable {
     struct Stats {
@@ -360,27 +435,31 @@ public actor SessionCoordinator {
         let metrics = PipelineMetrics()
         self.metrics = metrics
 
+        let pending = PendingFrame()
+        let chain = SendChain(pending: pending, gate: gate, transport: trans, metrics: metrics)
+
         try await capturer.startCapture(config: config) { frame in
             metrics.recordCapture()
-            guard gate.tryEnter() else { return }
+
+            // Skip encoding if there's already a pending frame waiting to be sent.
+            // Avoids wasting encoder resources on frames that would be overwritten.
+            guard !pending.hasPending else { return }
 
             do {
                 let encoded = try enc.encodeSync(frame)
                 let packet = PacketFramer.wrapVideoFrame(encoded)
-
-                let packetSize = packet.count
-                trans.sendTracked(packet) {
-                    let totalUs = (DispatchTime.now().uptimeNanoseconds - frame.captureTimeNs) / 1000
-                    gate.leave()
-                    metrics.recordSent(latencyUs: totalUs, bytes: packetSize)
-                }
+                pending.set(packet: packet, captureTimeNs: frame.captureTimeNs)
             } catch {
-                gate.leave()
                 print("[PIPE] Encode error: \(error)")
+                return
             }
+
+            // Try to start the send chain (or it's already self-driving)
+            guard gate.tryEnter() else { return }
+            chain.trySend()
         }
 
-        print("[SessionCoordinator] Pipeline active with backpressure gate.")
+        print("[SessionCoordinator] Pipeline active with encode-ahead.")
     }
 
     private func startHeartbeat() {
