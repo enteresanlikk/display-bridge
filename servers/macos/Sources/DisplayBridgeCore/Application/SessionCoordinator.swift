@@ -343,6 +343,10 @@ public actor SessionCoordinator {
                     payload: payload
                 )
                 try? await transport.send(pongPacket)
+            case .disconnect:
+                print("[SessionCoordinator] Client sent DISCONNECT")
+                inputListenerTask?.cancel()
+                return
             default:
                 print("[SessionCoordinator] Received unhandled packet type: \(type)")
             }

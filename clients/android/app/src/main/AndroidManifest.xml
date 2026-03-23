@@ -10,25 +10,16 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.NoActionBar">
 
-        <!-- ConnectionActivity: settings/launcher screen -->
+        <!-- ConnectionActivity: settings/launcher + USB accessory handler -->
         <activity
             android:name=".ConnectionActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.AppCompat.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
-
-        <!-- DisplayBridgeActivity: fullscreen streaming (launched by ConnectionActivity or USB accessory) -->
-        <activity
-            android:name=".DisplayBridgeActivity"
-            android:configChanges="orientation|screenSize|keyboardHidden"
-            android:exported="true"
-            android:keepScreenOn="true"
-            android:screenOrientation="fullSensor"
-            android:theme="@style/Theme.AppCompat.NoActionBar">
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED" />
             </intent-filter>
@@ -36,6 +27,15 @@
                 android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
                 android:resource="@xml/accessory_filter" />
         </activity>
+
+        <!-- DisplayBridgeActivity: fullscreen streaming (launched by ConnectionActivity) -->
+        <activity
+            android:name=".DisplayBridgeActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:keepScreenOn="true"
+            android:screenOrientation="fullSensor"
+            android:theme="@style/Theme.AppCompat.NoActionBar" />
 
     </application>
 

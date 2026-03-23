@@ -272,24 +272,24 @@ class DisplayBridgeActivity : AppCompatActivity(), ClientSession.SessionListener
     }
 
     /**
-     * Extracts the UsbAccessory from the intent or UsbManager.
-     * Falls back to UsbManager.getAccessoryList() if intent extra is missing
-     * (common on Samsung devices).
+     * Extracts the UsbAccessory from the intent.
+     * Only returns an accessory when explicitly launched for USB
+     * (via USB_ACCESSORY_ATTACHED action), so Network connections
+     * aren't hijacked when a USB cable is plugged in for charging.
      */
     @Suppress("DEPRECATION")
     private fun getUSBAccessory(): UsbAccessory? {
-        // First try: get from intent extra
-        val fromIntent = if (intent?.action == UsbManager.ACTION_USB_ACCESSORY_ATTACHED) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(UsbManager.EXTRA_ACCESSORY, UsbAccessory::class.java)
-            } else {
-                intent.getParcelableExtra(UsbManager.EXTRA_ACCESSORY)
-            }
-        } else null
+        if (intent?.action != UsbManager.ACTION_USB_ACCESSORY_ATTACHED) return null
 
+        // Get from intent extra
+        val fromIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(UsbManager.EXTRA_ACCESSORY, UsbAccessory::class.java)
+        } else {
+            intent.getParcelableExtra(UsbManager.EXTRA_ACCESSORY)
+        }
         if (fromIntent != null) return fromIntent
 
-        // Fallback: get from UsbManager directly (more reliable on some devices)
+        // Fallback: some devices (Samsung) don't include the extra in the intent
         val usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
         val list = usbManager.accessoryList
         if (!list.isNullOrEmpty()) {

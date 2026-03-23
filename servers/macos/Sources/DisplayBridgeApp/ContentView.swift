@@ -100,6 +100,19 @@ struct ContentView: View {
                 .padding(.top, 8)
             }
 
+            Button {
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Displays-Settings")!)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "display")
+                    Text("Display Settings")
+                    Image(systemName: "arrow.up.forward.square")
+                        .font(.caption)
+                }
+            }
+            .buttonStyle(.bordered)
+            .padding(.top, 8)
+
             // Connected Clients
             GroupBox("Connected Clients (\(serverManager.connectedClients.count))") {
                 if serverManager.connectedClients.isEmpty {

@@ -25,6 +25,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // would cause macOS to open a Terminal window as the "host app".
         NSApplication.shared.setActivationPolicy(.accessory)
         showWindow()
+
+        Task {
+            await serverManager.startServer()
+        }
     }
 
     func showWindow() {
