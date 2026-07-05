@@ -25,7 +25,7 @@ public final class AOAManager: @unchecked Sendable {
     private static let model        = "DisplayBridge"
     private static let description  = "DisplayBridge Virtual Display"
     private static let version      = "1.0"
-    private static let uri          = "https://github.com/nicepayment/display-bridge"
+    private static let uri          = "https://github.com/enteresanlikk/display-bridge"
     private static let serial       = "1"
 
     // MARK: - Properties
