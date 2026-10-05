@@ -118,7 +118,7 @@ class ConnectionActivity : AppCompatActivity() {
         }
         content.addView(portInput)
 
-        content.addView(label("Pairing code (shown on the Mac)"))
+        content.addView(label("Pairing code (shown on the server)"))
         pairingInput = editText(InputType.TYPE_CLASS_TEXT).apply {
             setText(prefs.getString(KEY_PAIRING, ""))
         }

@@ -47,4 +47,4 @@ pub use ffi::{
     displaybridge_session_connect_tcp, displaybridge_session_create, displaybridge_session_destroy, displaybridge_session_feed_bytes,
     displaybridge_monotonic_ns, displaybridge_session_notify_connected, displaybridge_session_send_input, displaybridge_session_set_config, displaybridge_session_set_pairing_code, displaybridge_session_submit_frame, displaybridge_session_wants_frame, DisplayBridgeSession,
 };
-pub use types::{DisplayBridgeCallbacks, DisplayBridgeClientStats, DisplayBridgeDeviceConfig, DisplayBridgeInputEvent, DisplayBridgeRole, DisplayBridgeSessionState, DisplayBridgeVideoCodec};
+pub use types::{DisplayBridgeCallbacks, DisplayBridgeClientStats, DisplayBridgeDeviceConfig, DisplayBridgeInputEvent, DisplayBridgePlatform, DisplayBridgeRole, DisplayBridgeSessionState, DisplayBridgeVideoCodec};

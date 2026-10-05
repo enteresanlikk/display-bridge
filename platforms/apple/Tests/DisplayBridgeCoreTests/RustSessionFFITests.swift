@@ -134,50 +134,41 @@ func sinkSessionLifecycleAndConfigMarshalling() throws {
     session.close()
 }
 
-/// The bitrate controller backs off when the link is saturated or frames are being
-/// skipped, recovers only when the link is clearly idle, and otherwise holds still.
+/// The bitrate controller drops straight to half of what a saturated link carried, climbs
+/// only when the stream used its bitrate on a link with room, and never climbs back into
+/// a limit it has already found.
 @Test
-func bitrateControllerFollowsLinkLoad() {
-    #expect(BitrateController.factor(linkBusy: 0.9, droppedPercent: 0) < 1)
-    #expect(BitrateController.factor(linkBusy: 0.6, droppedPercent: 30) < 1)
-    #expect(BitrateController.factor(linkBusy: 0.2, droppedPercent: 0) > 1)
-    #expect(BitrateController.factor(linkBusy: 0.5, droppedPercent: 0) == 1)
-    // Skips on an idle link (a burst after a still screen) are not a reason to back off:
-    // measured on a phone, that rule drove 80 Mbps down to 19 and kept it there.
-    #expect(BitrateController.factor(linkBusy: 0.15, droppedPercent: 5) > 1)
+func bitrateControllerFollowsTheLink() {
+    let mbps = 1_000_000
+    var c = BitrateController()
+    // Used its bitrate, link mostly idle, nothing known about the link yet: climb.
+    #expect(c.target(current: 30 * mbps, sentBps: 28e6, linkBusy: 0.2) == 33 * mbps)
+    // A still screen sends almost nothing: no evidence, no climb.
+    #expect(c.target(current: 30 * mbps, sentBps: 0.1e6, linkBusy: 0.0) == nil)
+    // Comfortable middle: hold.
+    #expect(c.target(current: 30 * mbps, sentBps: 28e6, linkBusy: 0.5) == nil)
+
+    // Measured on Wi-Fi: aiming for 100 Mbps, the link was 93% busy carrying 57.
+    #expect(c.target(current: 100 * mbps, sentBps: 57e6, linkBusy: 0.93) == 30_645_161)
+    // From there it may climb a little, but stops short of the 61 Mbps it found.
+    #expect(c.target(current: 30 * mbps, sentBps: 28e6, linkBusy: 0.05) == 33 * mbps)
+    #expect(c.target(current: 34 * mbps, sentBps: 30e6, linkBusy: 0.05) == nil)
 }
 
-/// The frame-size governor: an oversized motion frame raises the quantizer floor in one
-/// step by about what it takes to fit, the floor comes back down only slowly, and frames
-/// with small changes always keep the sharp floor.
+/// The quantizer floor is the transparent 20 where there are plenty of bits per pixel and
+/// rises for the tight streams that stalled a USB link in the first seconds of motion.
 @Test
-func frameSizeGovernorReactsPerFrame() {
-    var g = FrameSizeGovernor()
-    let start = g.motionQP
-    #expect(g.floor(changedFraction: 0.02) == FrameSizeGovernor.detailQP)
-    #expect(g.floor(changedFraction: 1) == start)
-
-    // 4x over budget: two halvings, six steps each.
-    g.observe(changedFraction: 1, frameBytes: 200_000, budgetBytes: 50_000)
-    #expect(g.motionQP == min(FrameSizeGovernor.maxQP, start + 12))
-
-    // Within budget: hold.
-    let raised = g.motionQP
-    g.observe(changedFraction: 1, frameBytes: 50_000, budgetBytes: 50_000)
-    #expect(g.motionQP == raised)
-
-    // Under budget: one step down only after a run of such frames.
-    for _ in 0..<(FrameSizeGovernor.framesPerStepDown - 1) {
-        g.observe(changedFraction: 1, frameBytes: 5_000, budgetBytes: 50_000)
-    }
-    #expect(g.motionQP == raised)
-    g.observe(changedFraction: 1, frameBytes: 5_000, budgetBytes: 50_000)
-    #expect(g.motionQP == raised - 1)
-
-    // Small-change frames teach it nothing, whatever their size, and stay sharp.
-    g.observe(changedFraction: 0.02, frameBytes: 900_000, budgetBytes: 50_000)
-    #expect(g.motionQP == raised - 1)
-    #expect(g.floor(changedFraction: 0.02) == FrameSizeGovernor.detailQP)
+func quantizerFloorFollowsBitsPerPixel() {
+    let usb = 50_000_000
+    // Galaxy Tab S9 Ultra and S23 Ultra at native resolution over USB: tight.
+    #expect(VideoToolboxEncoder.quantizerFloor(bitrate: usb, pixels: 2960 * 1848, fps: 120) == 28)
+    #expect(VideoToolboxEncoder.quantizerFloor(bitrate: usb, pixels: 3088 * 1440, fps: 120) == 27)
+    // 1080p over USB, and anything over a fast network: room to spare.
+    #expect(VideoToolboxEncoder.quantizerFloor(bitrate: usb, pixels: 1920 * 1080, fps: 120) == 20)
+    #expect(VideoToolboxEncoder.quantizerFloor(bitrate: 213_000_000, pixels: 3088 * 1440, fps: 120) == 20)
+    // Never outside 20...28, whatever it is handed.
+    #expect(VideoToolboxEncoder.quantizerFloor(bitrate: 1_000_000, pixels: 7680 * 4320, fps: 240) == 28)
+    #expect(VideoToolboxEncoder.quantizerFloor(bitrate: usb, pixels: 0, fps: 0) == 20)
 }
 
 /// Touch gestures, as a sink's screen reports them, become the right pointer events.

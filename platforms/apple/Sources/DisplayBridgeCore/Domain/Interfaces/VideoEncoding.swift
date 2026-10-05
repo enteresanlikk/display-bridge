@@ -10,9 +10,12 @@ public protocol VideoEncoding: Sendable {
     /// ceiling) and returns the new bitrate in bits per second, or 0 if nothing changed.
     /// Takes effect on the next frame, without a keyframe.
     func scaleBitrate(by factor: Double) -> Int
+    /// The bitrate the encoder is currently aiming for, in bits per second (0 if unknown).
+    var currentBitrate: Int { get }
 }
 
 public extension VideoEncoding {
     func scaleBitrate(by factor: Double) -> Int { 0 }
+    var currentBitrate: Int { 0 }
 }
 #endif

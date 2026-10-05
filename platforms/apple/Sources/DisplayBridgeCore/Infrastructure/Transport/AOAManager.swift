@@ -203,11 +203,10 @@ public final class AOAManager: @unchecked Sendable {
 
             let locationID = getLocationID(service)
 
-            // Skip if already negotiating or connected
-            let skip = lock.withLock {
-                negotiatingLocations.contains(locationID) || connectedDevices[locationID] != nil
+            let (negotiating, connected) = lock.withLock {
+                (negotiatingLocations.contains(locationID), connectedDevices[locationID] != nil)
             }
-            if skip { continue }
+            if connected { continue }
 
             // Check if this is already an AOA device
             var device: CUSBDeviceRef?
@@ -225,6 +224,9 @@ public final class AOAManager: @unchecked Sendable {
                 CUSBDeviceRelease(dev)
                 print("[AOAManager] AOA device detected (PID=0x\(String(productID, radix: 16)))")
                 openAOADevice(service: service, locationID: locationID)
+            } else if negotiating {
+                // Seen already; its accessory-mode replacement has not shown up yet.
+                CUSBDeviceRelease(dev)
             } else {
                 // Try AOA negotiation — control requests work without USBDeviceOpen
                 // (USBDeviceOpen would fail if ADB holds the device)
@@ -241,11 +243,19 @@ public final class AOAManager: @unchecked Sendable {
 
             let locationID = getLocationID(service)
 
+            // Switching to accessory mode replaces the device at this port with a new one,
+            // and the "old one removed" notification can arrive after the "new one added"
+            // notification. Only the removal of the device we actually opened is a
+            // disconnect; treating the stale one as such would tear down the session that
+            // just started (and skipping the new device while the old one was still
+            // listed left the phone on a black screen until the server was restarted).
             let clientID: UUID? = lock.withLock {
-                negotiatingLocations.remove(locationID)
-                if let kept = services.removeValue(forKey: locationID) {
+                if let kept = services[locationID] {
+                    guard IOObjectIsEqualTo(kept, service) != 0 else { return nil }
+                    services[locationID] = nil
                     IOObjectRelease(kept)
                 }
+                negotiatingLocations.remove(locationID)
                 return connectedDevices.removeValue(forKey: locationID)
             }
 

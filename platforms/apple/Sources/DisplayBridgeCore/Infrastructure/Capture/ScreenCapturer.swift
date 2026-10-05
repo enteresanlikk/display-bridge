@@ -125,21 +125,6 @@ public final class ScreenCapturer: NSObject, DisplayCapturing, SCStreamOutput, @
         }
     }
 
-    /// The share of the frame ScreenCaptureKit reports as changed since the last one.
-    /// The rectangles can overlap, so their sum is only capped at the whole frame.
-    private static func changedFraction(of sampleBuffer: CMSampleBuffer, width: Int, height: Int) -> Float {
-        guard width > 0, height > 0,
-              let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
-                as? [[SCStreamFrameInfo: Any]],
-              let rects = attachments.first?[.dirtyRects] as? [CFDictionary]
-        else { return 1 }
-        let changed = rects.reduce(CGFloat(0)) { sum, dict in
-            guard let rect = CGRect(dictionaryRepresentation: dict) else { return sum }
-            return sum + rect.width * rect.height
-        }
-        return Float(min(1, changed / CGFloat(width * height)))
-    }
-
     // MARK: - SCStreamOutput
 
     public func stream(
@@ -166,8 +151,7 @@ public final class ScreenCapturer: NSObject, DisplayCapturing, SCStreamOutput, @
             surface: surface,
             width: width,
             height: height,
-            captureTimeNs: captureTime,
-            changedFraction: Self.changedFraction(of: sampleBuffer, width: width, height: height)
+            captureTimeNs: captureTime
         )
 
         handler(frame)

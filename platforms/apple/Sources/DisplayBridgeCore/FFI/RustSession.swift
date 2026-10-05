@@ -385,7 +385,8 @@ extension DeviceConfig {
             height: Int(cValue.height),
             refreshRate: Int(cValue.refresh_rate),
             codec: codec,
-            deviceName: name
+            deviceName: name,
+            platform: ClientPlatform(cRawValue: cValue.platform)
         )
     }
 
@@ -398,8 +399,28 @@ extension DeviceConfig {
             height: Int32(height),
             refresh_rate: Int32(refreshRate),
             codec: cCodec.rawValue,
-            device_name: deviceName
+            device_name: deviceName,
+            platform: platform?.cRawValue ?? DisplayBridgePlatform_Unknown.rawValue
         )
+    }
+}
+
+private extension ClientPlatform {
+    /// The C enum value for each case, in one table used in both directions. Raw values,
+    /// because cbindgen's enum type name is ambiguous in Swift (see `init(cValue:)` above).
+    static let cRawValues: [(ClientPlatform, UInt32)] = [
+        (.macos, DisplayBridgePlatform_Macos.rawValue), (.windows, DisplayBridgePlatform_Windows.rawValue),
+        (.linux, DisplayBridgePlatform_Linux.rawValue), (.android, DisplayBridgePlatform_Android.rawValue),
+        (.ios, DisplayBridgePlatform_Ios.rawValue), (.ipados, DisplayBridgePlatform_Ipados.rawValue),
+    ]
+
+    init?(cRawValue: UInt32) {
+        guard let match = Self.cRawValues.first(where: { $0.1 == cRawValue }) else { return nil }
+        self = match.0
+    }
+
+    var cRawValue: UInt32 {
+        Self.cRawValues.first { $0.0 == self }!.1
     }
 }
 

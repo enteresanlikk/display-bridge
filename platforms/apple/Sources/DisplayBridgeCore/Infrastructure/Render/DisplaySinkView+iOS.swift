@@ -35,14 +35,14 @@ public final class DisplaySinkView: UIView {
         displayLayer.videoGravity = .resizeAspect
     }
 
-    /// Enqueues one decoded frame for display. Thread-safe.
-    public func enqueue(_ pixelBuffer: CVPixelBuffer, timestampMicros: UInt64) {
-        if Thread.isMainThread {
-            enqueueOnMain(pixelBuffer, timestampMicros: timestampMicros)
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                self?.enqueueOnMain(pixelBuffer, timestampMicros: timestampMicros)
-            }
+    /// Enqueues one decoded frame for display. Callable from any thread: it always hops
+    /// to the main thread, where the layer lives.
+    public nonisolated func enqueue(_ pixelBuffer: CVPixelBuffer, timestampMicros: UInt64) {
+        // The decoder hands each buffer over and never touches it again, so passing it to
+        // the main thread is safe even though the type is not marked Sendable.
+        nonisolated(unsafe) let frame = pixelBuffer
+        DispatchQueue.main.async { [weak self] in
+            self?.enqueueOnMain(frame, timestampMicros: timestampMicros)
         }
     }
 

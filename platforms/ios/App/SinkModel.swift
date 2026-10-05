@@ -39,7 +39,7 @@ final class SinkModel: ObservableObject, @unchecked Sendable {
         let screen = Self.screen()
         let config = DeviceConfig(
             width: screen.width, height: screen.height, refreshRate: screen.refreshRate,
-            codec: .hevc, deviceName: screen.name
+            codec: .hevc, deviceName: screen.name, platform: screen.platform
         )
         let surface = self.surface
         let coordinator = SinkCoordinator(
@@ -100,15 +100,17 @@ final class SinkModel: ObservableObject, @unchecked Sendable {
     // MARK: - Device
 
     /// The display to ask the source for: this screen, in landscape, at its native pixels.
-    private static func screen() -> (width: Int, height: Int, refreshRate: Int, name: String) {
+    private static func screen() -> (width: Int, height: Int, refreshRate: Int, name: String, platform: ClientPlatform?) {
         #if os(iOS)
         let pixels = UIScreen.main.nativeBounds.size // always portrait-up
         return (
             Int(max(pixels.width, pixels.height)), Int(min(pixels.width, pixels.height)),
-            UIScreen.main.maximumFramesPerSecond, UIDevice.current.name
+            UIScreen.main.maximumFramesPerSecond, UIDevice.current.name,
+            // The core only knows "iOS"; tell an iPad apart here.
+            UIDevice.current.userInterfaceIdiom == .pad ? .ipados : .ios
         )
         #else
-        return (1920, 1080, 60, "Sink")
+        return (1920, 1080, 60, "Sink", nil)
         #endif
     }
 

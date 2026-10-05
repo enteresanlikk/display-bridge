@@ -18,7 +18,8 @@ use std::sync::Mutex;
 use displaybridge_ffi::{
     displaybridge_session_connect_tcp, displaybridge_session_create, displaybridge_session_destroy,
     displaybridge_session_set_config, displaybridge_session_set_pairing_code, DisplayBridgeCallbacks,
-    DisplayBridgeDeviceConfig, DisplayBridgeRole, DisplayBridgeSessionState, DisplayBridgeVideoCodec,
+    DisplayBridgeDeviceConfig, DisplayBridgePlatform, DisplayBridgeRole, DisplayBridgeSessionState,
+    DisplayBridgeVideoCodec,
 };
 
 const USAGE: &str = "\
@@ -239,6 +240,7 @@ fn run(args: &Args) -> Result<(), String> {
         refresh_rate: args.refresh,
         codec: if args.hevc { DisplayBridgeVideoCodec::Hevc } else { DisplayBridgeVideoCodec::H264 },
         device_name: name.as_ptr(),
+        platform: DisplayBridgePlatform::Unknown,
     };
 
     // SAFETY: `session` is live until `displaybridge_session_destroy` below, every

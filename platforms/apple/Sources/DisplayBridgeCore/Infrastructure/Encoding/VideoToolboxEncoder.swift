@@ -25,62 +25,6 @@ private final class EncoderOutputContext {
     }
 }
 
-/// Keeps frames small when the picture starts moving.
-///
-/// While the screen is still, rate control settles on its best quality. When most of the
-/// screen then changes at once (a scroll, a window switch), it keeps that quality for the
-/// first frames and takes about two seconds to adapt: hundreds of kilobytes per frame,
-/// each many frame intervals long on a USB link. That is the stutter at the start of
-/// every motion.
-///
-/// This reacts per frame instead. Frames in which a large part of the screen changed are
-/// encoded with a higher quantizer floor, learned from how big such frames come out
-/// against the per-frame budget; frames with small changes keep the low floor, so text
-/// sharpens again as soon as the motion stops.
-struct FrameSizeGovernor {
-    /// Floor for frames with small changes: visually transparent.
-    static let detailQP = 20
-    static let maxQP = 45
-    /// A frame counts as motion when at least this much of it changed.
-    static let motionThreshold: Float = 0.25
-
-    /// Floor for motion frames. Kept between bursts of motion, so the next scroll starts
-    /// at the right size from its first frame. Starts high: an oversized first frame
-    /// costs a visible hitch, a soft one is corrected within a second.
-    private(set) var motionQP = 40
-    private var framesUnderBudget = 0
-    /// Frames that must come in under budget before the floor drops one step. Slow on
-    /// purpose: after a burst the encoder's own rate control runs above this floor for a
-    /// while, and the small frames it produces then say nothing about the floor. Dropping
-    /// a step per frame walked the floor far below what the content needs, and the next
-    /// frame encoded at it was several times the budget — a sawtooth of stalls.
-    static let framesPerStepDown = 8
-
-    /// The quantizer floor to encode the next frame with.
-    func floor(changedFraction: Float) -> Int {
-        changedFraction >= Self.motionThreshold ? motionQP : Self.detailQP
-    }
-
-    /// Learns from a non-keyframe that was encoded with `floor(changedFraction:)`.
-    mutating func observe(changedFraction: Float, frameBytes: Int, budgetBytes: Int) {
-        guard changedFraction >= Self.motionThreshold, budgetBytes > 0 else { return }
-        let ratio = Double(frameBytes) / Double(budgetBytes)
-        if ratio > 1.5 {
-            // Six quantizer steps roughly halve the size: jump straight to where it fits.
-            motionQP = min(Self.maxQP, motionQP + Int((6 * log2(ratio)).rounded()))
-            framesUnderBudget = 0
-        } else if ratio < 0.6 {
-            framesUnderBudget += 1
-            if framesUnderBudget >= Self.framesPerStepDown {
-                motionQP = max(Self.detailQP, motionQP - 1)
-                framesUnderBudget = 0
-            }
-        } else {
-            framesUnderBudget = 0
-        }
-    }
-}
-
 public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
     private var compressionSession: VTCompressionSession?
     private var sequenceCounter: UInt64 = 0
@@ -93,12 +37,22 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
     /// Maximum bitrate in bits/sec. Set before `setup()` to limit for bandwidth-constrained transports.
     public var maxBitrate: Int = 500_000_000
 
-    private var governor = FrameSizeGovernor()
-    /// The quantizer floor currently set on the session.
-    private var appliedFloor = 0
-    /// Bytes one frame may take at the current bitrate and refresh rate.
-    private var frameBudget = 0
-    private var refreshRate = 60
+    /// The lowest quantizer the encoder may use for a stream with this many bits to spend
+    /// per pixel per frame. It is what decides how big frames are in the first seconds
+    /// after a still screen starts moving, before rate control has reacted: with too low
+    /// a floor those frames are several times the per-frame budget and stall a USB link.
+    ///
+    /// Measured on scrolling full-screen text over USB at 2960x1848@120, 50 Mbps: floor 20
+    /// skips 44% of the first second's frames, 24 skips 26%, 26 skips 17%. Roomier streams
+    /// (lower resolution, faster link) keep the transparent floor of 20.
+    static func quantizerFloor(bitrate: Int, pixels: Int, fps: Int) -> Int {
+        guard pixels > 0, fps > 0 else { return 20 }
+        let bitsPerPixel = Double(bitrate) / Double(pixels) / Double(fps)
+        // 20 at 0.2 bit/pixel and above, 28 at 0.08 and below, a straight line in between
+        // on a log scale (frame size halves about every four quantizer steps).
+        let floor = 28 - 8 * log2(bitsPerPixel / 0.08) / log2(0.2 / 0.08)
+        return Int(min(28, max(20, floor)).rounded())
+    }
 
     /// Never adapt below this: under it text stops being readable at desktop sizes.
     private static let minBitrate = 5_000_000
@@ -108,9 +62,27 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
     /// orientation change does not throw away what was learned about the link.
     private var bitrateScale = 1.0
 
+    /// Where to start below the ceiling, for links whose speed is unknown until tried
+    /// (Wi-Fi). Applied once; link adaptation moves on from there.
+    public var initialBitrate: Int?
+    private var scaleSeeded = false
+
+    /// The quantizer floor the running session was created with, and whether the bitrate
+    /// has since moved far enough to want a different one. The floor is read once per
+    /// session, so following the bitrate means building a new session; `encodeSync` does
+    /// that between frames, on the thread that encodes.
+    private var sessionFloor = 20
+    private var needsRebuild = false
+    private var lastConfig: DeviceConfig?
+
+    public var currentBitrate: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return baseBitrate > 0 ? max(Self.minBitrate, Int(Double(baseBitrate) * bitrateScale)) : 0
+    }
+
     private func applyBitrate(to session: VTCompressionSession) -> Int {
         let bitrate = max(Self.minBitrate, Int(Double(baseBitrate) * bitrateScale))
-        frameBudget = bitrate / 8 / max(1, refreshRate)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
         // Hard cap: 25% headroom above average for keyframe bursts
         let dataRateLimits: [Int] = [bitrate / 8 * 5 / 4, 1]
@@ -126,7 +98,14 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
         let scale = min(1.0, max(floor, bitrateScale * factor))
         guard scale != bitrateScale else { return 0 } // already at the floor or ceiling
         bitrateScale = scale
-        return applyBitrate(to: session)
+        let bitrate = applyBitrate(to: session)
+        let wanted = Self.quantizerFloor(
+            bitrate: bitrate, pixels: currentWidth * currentHeight, fps: lastConfig?.refreshRate ?? 0
+        )
+        // Two steps of slack, so a bitrate hovering at a boundary does not rebuild (and
+        // send a keyframe) every second.
+        if abs(wanted - sessionFloor) >= 2 { needsRebuild = true }
+        return bitrate
     }
 
     public init() {}
@@ -136,10 +115,12 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
     public func setup(config: DeviceConfig) throws {
         lock.lock()
 
-        if isConfigured && currentWidth == config.width && currentHeight == config.height && currentCodec == config.codec {
+        if isConfigured && !needsRebuild && currentWidth == config.width && currentHeight == config.height && currentCodec == config.codec {
             lock.unlock()
             return
         }
+        needsRebuild = false
+        lastConfig = config
 
         defer { lock.unlock() }
 
@@ -318,8 +299,10 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
         let pixelsPerFrame = config.width * config.height
         let targetBitrate = Double(pixelsPerFrame) * 0.4 * Double(config.refreshRate)
         baseBitrate = min(maxBitrate, max(50_000_000, Int(targetBitrate)))
-        refreshRate = config.refreshRate
-        appliedFloor = 0
+        if !scaleSeeded {
+            scaleSeeded = true
+            if let initialBitrate { bitrateScale = min(1, Double(initialBitrate) / Double(baseBitrate)) }
+        }
         _ = applyBitrate(to: session)
 
         // A keyframe is several times the size of a normal frame, so each one stalls the
@@ -329,10 +312,17 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: (config.refreshRate * 5) as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 5.0 as CFNumber)
 
-        // The quantizer floor is set per frame in `encodeSync` (see FrameSizeGovernor).
-        // Even its lowest value matters: without any floor, rate control spends a still
-        // screen's whole per-second budget polishing one frame to near-lossless —
-        // megabyte frames that take 50+ ms to cross a USB link.
+        // A floor on the quantizer. Without one, rate control spends a still screen's whole
+        // per-second budget polishing one frame to near-lossless: megabyte frames that take
+        // 50+ ms to cross a USB link. It has to be chosen here: VideoToolbox reads it once.
+        // Changing it on a running session is silently ignored — measured, also with a
+        // forced keyframe or a second PrepareToEncodeFrames — so it cannot follow motion.
+        if #available(macOS 13.0, *) {
+            sessionFloor = Self.quantizerFloor(
+                bitrate: Int(Double(baseBitrate) * bitrateScale), pixels: pixelsPerFrame, fps: config.refreshRate
+            )
+            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MinAllowedFrameQP, value: sessionFloor as CFNumber)
+        }
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: config.refreshRate as CFNumber)
         let profileLevel: CFString = config.codec == .hevc
             ? kVTProfileLevel_HEVC_Main_AutoLevel
@@ -353,6 +343,13 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
     /// This is the fast path for real-time video: no Task scheduling, no async overhead.
     /// Call from a dedicated thread (e.g., ScreenCaptureKit's streamQueue).
     public func encodeSync(_ frame: VideoFrame) throws -> EncodedFrame {
+        // The bitrate moved into a different quantizer-floor band: build the session anew.
+        // Its first frame is a keyframe, so the stream stays decodable.
+        lock.lock()
+        let rebuild = needsRebuild ? lastConfig : nil
+        lock.unlock()
+        if let rebuild { try setup(config: rebuild) }
+
         lock.lock()
         guard let session = compressionSession, isConfigured else {
             lock.unlock()
@@ -361,12 +358,6 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
         let seq = sequenceCounter
         let codec = currentCodec
         sequenceCounter += 1
-        let floor = governor.floor(changedFraction: frame.changedFraction)
-        if floor != appliedFloor, #available(macOS 13.0, *) {
-            VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MinAllowedFrameQP, value: floor as CFNumber)
-            appliedFloor = floor
-        }
-        let budget = frameBudget
         lock.unlock()
 
         // Create a pixel buffer backed by the IOSurface for zero-copy
@@ -414,13 +405,7 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
         guard let result = encodeResult else {
             throw VideoEncoderError.noDataReturned
         }
-        let encoded = try result.get()
-        if !encoded.isKeyFrame {
-            lock.lock()
-            governor.observe(changedFraction: frame.changedFraction, frameBytes: encoded.data.count, budgetBytes: budget)
-            lock.unlock()
-        }
-        return encoded
+        return try result.get()
     }
 
     public func encode(_ frame: VideoFrame) async throws -> EncodedFrame {

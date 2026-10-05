@@ -11,6 +11,27 @@
 #include <stdlib.h>
 
 /**
+ * What a sink runs on, mirroring `displaybridge_protocol::Platform`. `Unknown` is zero,
+ * so a zeroed config struct says "unknown".
+ */
+enum DisplayBridgePlatform
+#ifdef __cplusplus
+  : uint32_t
+#endif // __cplusplus
+ {
+  DisplayBridgePlatform_Unknown = 0,
+  DisplayBridgePlatform_Macos = 1,
+  DisplayBridgePlatform_Windows = 2,
+  DisplayBridgePlatform_Linux = 3,
+  DisplayBridgePlatform_Android = 4,
+  DisplayBridgePlatform_Ios = 5,
+  DisplayBridgePlatform_Ipados = 6,
+};
+#ifndef __cplusplus
+typedef uint32_t DisplayBridgePlatform;
+#endif // __cplusplus
+
+/**
  * The role this session plays, mirroring `displaybridge_protocol::Role`.
  */
 enum DisplayBridgeRole
@@ -121,6 +142,11 @@ typedef struct {
    * Optional human-readable device name (nullable, NUL-terminated UTF-8).
    */
   const char *device_name;
+  /**
+   * What the sink runs on. A sink may leave it `Unknown`: the core then fills in the
+   * platform it was compiled for. A source reads it to label the client.
+   */
+  DisplayBridgePlatform platform;
 } DisplayBridgeDeviceConfig;
 
 /**

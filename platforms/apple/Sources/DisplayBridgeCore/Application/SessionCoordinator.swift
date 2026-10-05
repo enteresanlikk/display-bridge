@@ -20,27 +20,56 @@ public struct ClientStats: Sendable {
     public let linkBusyPercent: Double
 }
 
-/// Decides how to move the encoder bitrate from how loaded the link was over the last
-/// second. The aim is a link that is busy about half the time: a frame then spends half a
-/// frame interval on the wire, and there is room for a burst.
-///
-/// Skipped frames only count together with a busy link. On their own they are not
-/// evidence of a slow link (one large frame after a still screen skips a few), and backing
-/// off on them alone ratchets the bitrate down to where it can never recover.
-enum BitrateController {
-    /// The factor to scale the bitrate by: below 1 to back off, above 1 to recover, 1 to hold.
-    static func factor(linkBusy: Double, droppedPercent: Double) -> Double {
-        if linkBusy >= 0.7 || (linkBusy >= 0.5 && droppedPercent >= 10) { return 0.8 }
-        if linkBusy <= 0.35 { return 1.1 }
-        return 1
+/// Decides where to move the encoder bitrate from how the link did over the last second.
+/// The aim is a link that is busy about half the time: a frame then spends half a frame
+/// interval on the wire, and there is room for a burst.
+struct BitrateController {
+    /// What the link carried the last time it was saturated, in bits per second.
+    private(set) var linkCapacity: Double?
+
+    /// The bitrate to switch to, or nil to stay.
+    /// - Parameters:
+    ///   - current: what the encoder is aiming for now, bits per second.
+    ///   - sentBps: what actually went out over the last second.
+    ///   - linkBusy: the share of that second the transport spent writing, 0...1.
+    mutating func target(current: Int, sentBps: Double, linkBusy: Double) -> Int? {
+        if linkBusy >= 0.7 {
+            // What the link carried while it was busy is what it can carry. Go straight to
+            // half of that instead of feeling the way down: a Wi-Fi session that starts at
+            // five times the link's speed was otherwise unusable for seven seconds.
+            let capacity = sentBps / linkBusy
+            linkCapacity = capacity
+            return min(Int(Double(current) * 0.8), Int(capacity * 0.5))
+        }
+        // Climb only on evidence: the stream really used its bitrate and the link had room.
+        // An idle screen proves nothing about the link.
+        if linkBusy <= 0.35, sentBps >= Double(current) * 0.5 {
+            let next = Double(current) * 1.1
+            // And not back into a wall already hit. A TCP link shows no load at all until
+            // it is full, so climbing "until it hurts" means a second of skipped frames
+            // every few seconds.
+            if let linkCapacity, next > linkCapacity * 0.6 { return nil }
+            return Int(next)
+        }
+        return nil
     }
 }
 
-/// Time the transport spent inside writes since the last reading.
+/// Time the transport spent inside writes since the last reading, and what was learned
+/// about the link from it.
 private final class LinkLoad: @unchecked Sendable {
     private let lock = NSLock()
     private var busyNs: UInt64 = 0
     private var since = RustSession.monotonicNanoseconds()
+    private var controller = BitrateController()
+
+    /// The bitrate to move to after a second in which the link was `busy` and carried
+    /// `sentBps`, or nil to stay.
+    func nextBitrate(current: Int, sentBps: Double, busy: Double) -> Int? {
+        lock.lock()
+        defer { lock.unlock() }
+        return controller.target(current: current, sentBps: sentBps, linkBusy: busy)
+    }
 
     func record(busyNs: UInt64) {
         lock.lock()
@@ -275,13 +304,14 @@ public final class SessionCoordinator: @unchecked Sendable {
             onStats: { stats in
                 let enc = timing.take()
                 let busy = link.take()
-                let factor = BitrateController.factor(linkBusy: busy, droppedPercent: stats.droppedPercent)
-                if factor != 1, stats.captureFps > 0 {
-                    let bps = encoder.scaleBitrate(by: factor)
+                let current = encoder.currentBitrate
+                if stats.captureFps > 0, current > 0,
+                   let target = link.nextBitrate(current: current, sentBps: enc.mbps * 1_000_000, busy: busy) {
+                    let bps = encoder.scaleBitrate(by: Double(target) / Double(current))
                     if bps > 0 {
                         print(String(
-                            format: "[SessionCoordinator] Link %.0f%% busy, %.0f%% of frames skipped: bitrate -> %.0f Mbps",
-                            busy * 100, stats.droppedPercent, Double(bps) / 1_000_000
+                            format: "[SessionCoordinator] Link %.0f%% busy carrying %.0f Mbps: bitrate %.0f -> %.0f Mbps",
+                            busy * 100, enc.mbps, Double(current) / 1_000_000, Double(bps) / 1_000_000
                         ))
                     }
                 }

@@ -13,7 +13,7 @@ struct ConnectScreen: View {
         Form {
             Section("Found on this network") {
                 if model.sources.isEmpty {
-                    Text("Looking for a Mac running DisplayBridge…")
+                    Text("Looking for a DisplayBridge server…")
                         .foregroundStyle(.secondary)
                 }
                 ForEach(model.sources) { source in
@@ -24,13 +24,13 @@ struct ConnectScreen: View {
                 }
             }
 
-            Section("Source") {
+            Section("Server") {
                 TextField("Host", text: $host)
                     .autocorrectionDisabled()
                     .addressKeyboard()
                 TextField("Port", value: $port, format: .number.grouping(.never))
                     .numberKeyboard()
-                TextField("Pairing code (shown on the Mac)", text: $pairingCode)
+                TextField("Pairing code (shown on the server)", text: $pairingCode)
                     .autocorrectionDisabled()
                     .addressKeyboard()
             }

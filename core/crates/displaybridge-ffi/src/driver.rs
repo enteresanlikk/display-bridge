@@ -25,7 +25,7 @@ pub(crate) fn monotonic_ns() -> u64 {
 }
 
 use displaybridge_protocol::{
-    DeviceConfig, EncodedFrame, InputEvent, PacketFramer, PacketType, Role,
+    DeviceConfig, EncodedFrame, InputEvent, PacketFramer, PacketType, Platform, Role,
 };
 use displaybridge_session::{
     AuthThrottle, PendingFrame, PipelineMetrics, SessionCommand, SessionEvent, SessionMachine,
@@ -267,6 +267,7 @@ impl Driver {
             match config {
                 Some(mut cfg) => match {
                     cfg.pairing_code = self.pairing_code.lock().unwrap().clone();
+                    cfg.platform.get_or_insert_with(Platform::current);
                     cfg.to_json()
                 } {
                     Ok(json) => {

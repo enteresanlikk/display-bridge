@@ -36,6 +36,12 @@ final class Box<T>: @unchecked Sendable {
     func get() -> T { lock.lock(); defer { lock.unlock() }; return value }
 }
 
+/// Blocks on a semaphore. A plain function, because the top level of this file is async
+/// and the compiler (rightly) objects to semaphore waits written there directly.
+func wait(_ semaphore: DispatchSemaphore, seconds: Int) -> DispatchTimeoutResult {
+    semaphore.wait(timeout: .now() + .seconds(seconds))
+}
+
 func waitUntil(timeout: TimeInterval, _ cond: @escaping () -> Bool) -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
     while Date() < deadline {
@@ -193,7 +199,7 @@ do {
 // Kick the sink: emits HandshakeReq → source core → reconfigure/startCapture → ack → sink Streaming.
 sink.notifyConnected()
 
-if sinkStreaming.wait(timeout: .now() + 3) == .timedOut {
+if wait(sinkStreaming, seconds: 3) == .timedOut {
     check(false, "sink reached Streaming (handshake completed)")
     print("\(failures) FAILURES"); exit(1)
 }
@@ -218,7 +224,7 @@ let frame = VideoFrame(
 )
 capturer.emit(frame)
 
-if decodeArrived.wait(timeout: .now() + 3) == .timedOut {
+if wait(decodeArrived, seconds: 3) == .timedOut {
     check(false, "sink decoded the streamed frame")
 } else if let (gotNal, gotKey) = decoded.get() {
     check(gotNal == nal, "sink decoded the exact NAL bytes")
@@ -246,7 +252,7 @@ usleep(50_000)
 await coordinator.stopSession()
 check(!capturer.capturing.get(), "stopSession stopped the capture")
 hammering.set(false)
-hammerDone.wait()
+_ = wait(hammerDone, seconds: 30)
 check(true, "frames submitted during teardown did not crash")
 
 sink.close()

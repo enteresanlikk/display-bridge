@@ -45,7 +45,25 @@ pub enum Platform {
     Android,
     Ios,
     Ipados,
+    /// Anything else, including names a newer peer uses that this build has not heard of:
+    /// an unfamiliar platform must not make the handshake unparseable.
+    #[serde(other)]
     Unknown,
+}
+
+impl Platform {
+    /// The platform this code was compiled for.
+    pub fn current() -> Self {
+        match std::env::consts::OS {
+            "macos" => Platform::Macos,
+            "windows" => Platform::Windows,
+            "linux" => Platform::Linux,
+            "android" => Platform::Android,
+            // iPhone and iPad share one target; the app can say "ipados" itself.
+            "ios" => Platform::Ios,
+            _ => Platform::Unknown,
+        }
+    }
 }
 
 /// The per-connection display configuration. Field names and the `codec` string
@@ -61,6 +79,9 @@ pub struct DeviceConfig {
     pub codec: VideoCodec,
     #[serde(rename = "deviceName", default, skip_serializing_if = "Option::is_none")]
     pub device_name: Option<String>,
+    /// What the sink runs on, so the source can show it next to the device name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<Platform>,
     /// The pairing code shown on the source, presented by a sink in its handshake.
     /// Never echoed back in the ack.
     #[serde(rename = "pairingCode", default, skip_serializing_if = "Option::is_none")]
@@ -75,6 +96,7 @@ impl DeviceConfig {
             refresh_rate,
             codec,
             device_name: None,
+            platform: None,
             pairing_code: None,
         }
     }
@@ -174,6 +196,7 @@ mod tests {
             refresh_rate: 60,
             codec: VideoCodec::Hevc,
             device_name: Some("Pixel".into()),
+            platform: None,
             pairing_code: None,
         };
         let json = cfg.to_json().unwrap();
@@ -185,6 +208,12 @@ mod tests {
         assert!(json.contains("\"deviceName\":\"Pixel\""));
         // Absent unless set, so sinks that predate pairing produce identical JSON.
         assert!(!json.contains("pairingCode"));
+        assert!(!json.contains("platform"));
+        let android = DeviceConfig { platform: Some(Platform::Android), ..cfg.clone() };
+        assert!(android.to_json().unwrap().contains("\"platform\":\"android\""));
+        // A platform name from the future parses as Unknown instead of failing the handshake.
+        let future = DeviceConfig::from_json(r#"{"width":1,"height":1,"refreshRate":60,"platform":"visionos"}"#).unwrap();
+        assert_eq!(future.platform, Some(Platform::Unknown));
         let paired = DeviceConfig { pairing_code: Some("123456".into()), ..cfg };
         assert!(paired.to_json().unwrap().contains("\"pairingCode\":\"123456\""));
     }

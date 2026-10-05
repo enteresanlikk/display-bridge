@@ -41,6 +41,8 @@ final class ServerManager: ObservableObject {
         let id: UUID
         let deviceName: String
         let transportType: String  // "USB" or "Network"
+        /// "Android", "iPadOS", ...; nil if the client did not say (an older build).
+        let platform: String?
         let width: Int
         let height: Int
         let refreshRate: Int
@@ -63,10 +65,14 @@ final class ServerManager: ObservableObject {
             }
         }
 
-        eng.onClientConnected = { [weak self] clientID, deviceName, transportType, width, height, refreshRate in
+        eng.onClientConnected = { [weak self] clientID, deviceName, transportType, config in
             guard let self else { return }
             Task { @MainActor in
-                let info = ClientInfo(id: clientID, deviceName: deviceName, transportType: transportType, width: width, height: height, refreshRate: refreshRate)
+                let info = ClientInfo(
+                    id: clientID, deviceName: deviceName, transportType: transportType,
+                    platform: config.platform?.displayName,
+                    width: config.width, height: config.height, refreshRate: config.refreshRate
+                )
                 self.connectedClients.append(info)
             }
         }

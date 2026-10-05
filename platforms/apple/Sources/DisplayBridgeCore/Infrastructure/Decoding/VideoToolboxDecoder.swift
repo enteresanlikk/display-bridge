@@ -185,7 +185,7 @@ public final class VideoToolboxDecoder: @unchecked Sendable {
         var result: CMVideoFormatDescription?
         var status: OSStatus = noErr
 
-        _ = try withAll(0) {
+        _ = withAll(0) {
             var formatDesc: CMFormatDescription?
             switch codec {
             case .hevc:

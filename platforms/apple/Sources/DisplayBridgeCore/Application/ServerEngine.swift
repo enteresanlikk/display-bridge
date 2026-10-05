@@ -133,7 +133,8 @@ public final class ServerEngine: @unchecked Sendable {
     public var maxBitrate: Int?
 
     // Callbacks — GUI uses these to update state
-    public var onClientConnected: (@Sendable (UUID, String, String, Int, Int, Int) -> Void)?
+    /// (id, device name, transport, the client's display config incl. its platform)
+    public var onClientConnected: (@Sendable (UUID, String, String, DeviceConfig) -> Void)?
     public var onClientDisconnected: (@Sendable (UUID) -> Void)?
     public var onClientStatsUpdated: (@Sendable (UUID, ClientStats) -> Void)?
     public var onStateChanged: (@Sendable (Bool) -> Void)?
@@ -259,6 +260,11 @@ public final class ServerEngine: @unchecked Sendable {
         // the link. The coordinator backs off further on slower links.
         if transportType == "USB" {
             encoder.maxBitrate = 50_000_000
+        } else {
+            // A network link can be anything from 30 Mbps of Wi-Fi to a gigabit of cable.
+            // Start where ordinary Wi-Fi copes (a tablet on 802.11ac measured ~57 Mbps of
+            // real throughput) and let the coordinator climb from there.
+            encoder.initialBitrate = 60_000_000
         }
         if let maxBitrate {
             encoder.maxBitrate = min(encoder.maxBitrate, maxBitrate)
@@ -283,11 +289,11 @@ public final class ServerEngine: @unchecked Sendable {
                         print("[Client \(shortID)] Virtual display creation failed: \(error), using main display")
                         newID = CGMainDisplayID()
                     }
-                    print("[Client \(shortID)] Virtual display created: \(deviceName) (ID: \(newID))")
+                    print("[Client \(shortID)] Virtual display created: \(deviceName) (\(clientConfig.platform?.displayName ?? "unknown platform"), ID: \(newID))")
                     pipelineReady.value = true
 
                     self?.activeClients.updateDeviceName(clientID, name: deviceName)
-                    self?.onClientConnected?(clientID, deviceName, transportType, clientConfig.width, clientConfig.height, clientConfig.refreshRate)
+                    self?.onClientConnected?(clientID, deviceName, transportType, clientConfig)
                 } else {
                     newID = try vdm.recreate(config: clientConfig, deviceName: deviceName)
                     print("[Client \(shortID)] Virtual display recreated: \(deviceName) (ID: \(newID))")

@@ -8,7 +8,7 @@
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::ptr;
 
-use displaybridge_protocol::{DeviceConfig, InputEvent, InputKind, Role, VideoCodec};
+use displaybridge_protocol::{DeviceConfig, InputEvent, InputKind, Platform, Role, VideoCodec};
 use displaybridge_session::{ClientStats, SessionState};
 
 /// The role this session plays, mirroring `displaybridge_protocol::Role`.
@@ -62,6 +62,48 @@ impl From<VideoCodec> for DisplayBridgeVideoCodec {
     }
 }
 
+/// What a sink runs on, mirroring `displaybridge_protocol::Platform`. `Unknown` is zero,
+/// so a zeroed config struct says "unknown".
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayBridgePlatform {
+    Unknown = 0,
+    Macos = 1,
+    Windows = 2,
+    Linux = 3,
+    Android = 4,
+    Ios = 5,
+    Ipados = 6,
+}
+
+impl From<Platform> for DisplayBridgePlatform {
+    fn from(p: Platform) -> Self {
+        match p {
+            Platform::Macos => DisplayBridgePlatform::Macos,
+            Platform::Windows => DisplayBridgePlatform::Windows,
+            Platform::Linux => DisplayBridgePlatform::Linux,
+            Platform::Android => DisplayBridgePlatform::Android,
+            Platform::Ios => DisplayBridgePlatform::Ios,
+            Platform::Ipados => DisplayBridgePlatform::Ipados,
+            Platform::Unknown => DisplayBridgePlatform::Unknown,
+        }
+    }
+}
+
+impl From<DisplayBridgePlatform> for Option<Platform> {
+    fn from(p: DisplayBridgePlatform) -> Self {
+        Some(match p {
+            DisplayBridgePlatform::Unknown => return None,
+            DisplayBridgePlatform::Macos => Platform::Macos,
+            DisplayBridgePlatform::Windows => Platform::Windows,
+            DisplayBridgePlatform::Linux => Platform::Linux,
+            DisplayBridgePlatform::Android => Platform::Android,
+            DisplayBridgePlatform::Ios => Platform::Ios,
+            DisplayBridgePlatform::Ipados => Platform::Ipados,
+        })
+    }
+}
+
 /// Observable session lifecycle state, mirroring `displaybridge_session::SessionState`.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +148,9 @@ pub struct DisplayBridgeDeviceConfig {
     pub codec: DisplayBridgeVideoCodec,
     /// Optional human-readable device name (nullable, NUL-terminated UTF-8).
     pub device_name: *const c_char,
+    /// What the sink runs on. A sink may leave it `Unknown`: the core then fills in the
+    /// platform it was compiled for. A source reads it to label the client.
+    pub platform: DisplayBridgePlatform,
 }
 
 impl DisplayBridgeDeviceConfig {
@@ -129,6 +174,7 @@ impl DisplayBridgeDeviceConfig {
             refresh_rate: self.refresh_rate,
             codec: self.codec.into(),
             device_name,
+            platform: self.platform.into(),
             pairing_code: None,
         }
     }
@@ -304,6 +350,7 @@ impl SafeCallbacks {
             refresh_rate: config.refresh_rate,
             codec: config.codec.into(),
             device_name: cname.as_ref().map_or(ptr::null(), |c| c.as_ptr()),
+            platform: config.platform.map_or(DisplayBridgePlatform::Unknown, Into::into),
         };
         cb(self.0.ctx, &db_config);
         drop(cname);

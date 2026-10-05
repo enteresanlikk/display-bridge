@@ -20,6 +20,8 @@ data class DeviceConfig(
         if (deviceName != null) {
             json.put("deviceName", deviceName)
         }
+        // Lets the server show what kind of device this is.
+        json.put("platform", "android")
         if (!pairingCode.isNullOrBlank()) {
             json.put("pairingCode", pairingCode)
         }

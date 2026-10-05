@@ -17,7 +17,7 @@ use displaybridge_ffi::{
     displaybridge_session_send_input, displaybridge_session_set_config, displaybridge_session_set_pairing_code,
     displaybridge_session_submit_frame, displaybridge_session_wants_frame,
     DisplayBridgeCallbacks, DisplayBridgeClientStats, DisplayBridgeDeviceConfig, DisplayBridgeInputEvent,
-    DisplayBridgeRole, DisplayBridgeSessionState, DisplayBridgeVideoCodec,
+    DisplayBridgePlatform, DisplayBridgeRole, DisplayBridgeSessionState, DisplayBridgeVideoCodec,
 };
 use displaybridge_protocol::{DeviceConfig, PacketFramer, PacketType, VideoCodec};
 use displaybridge_transport::{TcpListenerTransport, TcpTransport, Transport};
@@ -33,6 +33,8 @@ struct TestCtx {
     start_capture_calls: AtomicUsize,
     stop_capture_calls: AtomicUsize,
     last_config: Mutex<Option<(i32, i32, i32)>>,
+    /// The platform the sink reported, as the source's `reconfigure` callback saw it.
+    last_platform: Mutex<Option<DisplayBridgePlatform>>,
     /// Framed bytes the session emitted through the native `send` callback
     /// (used by the in-process native-transport loopback test).
     out: Mutex<Vec<Vec<u8>>>,
@@ -109,6 +111,7 @@ extern "C" fn cb_reconfigure(ctx: *mut c_void, config: *const DisplayBridgeDevic
     let c = unsafe { &*(ctx as *const TestCtx) };
     c.reconfigure_calls.fetch_add(1, Ordering::SeqCst);
     if let Some(cfg) = unsafe { config.as_ref() } {
+        *c.last_platform.lock().unwrap() = Some(cfg.platform);
         *c.last_config.lock().unwrap() = Some((cfg.width, cfg.height, cfg.refresh_rate));
     }
 }
@@ -184,6 +187,7 @@ fn sink_connects_sends_handshake_and_decodes_frames() {
         refresh_rate: 60,
         codec: DisplayBridgeVideoCodec::Hevc,
         device_name: name.as_ptr(),
+        platform: DisplayBridgePlatform::Unknown,
     };
     assert!(unsafe { displaybridge_session_set_config(handle, &cfg) });
 
@@ -356,6 +360,7 @@ fn native_transport_inprocess_source_sink_loopback() {
         refresh_rate: 90,
         codec: DisplayBridgeVideoCodec::Hevc,
         device_name: name.as_ptr(),
+        platform: DisplayBridgePlatform::Unknown,
     };
     assert!(unsafe { displaybridge_session_set_config(sink, &cfg) });
 
@@ -380,6 +385,10 @@ fn native_transport_inprocess_source_sink_loopback() {
     assert!(source_ctx.reconfigure_calls.load(Ordering::SeqCst) >= 1);
     assert!(source_ctx.start_capture_calls.load(Ordering::SeqCst) >= 1);
     assert_eq!(*source_ctx.last_config.lock().unwrap(), Some((2400, 1080, 90)));
+    // The sink left its platform unset, so the core reported the one it runs on.
+    let here = DisplayBridgePlatform::from(displaybridge_protocol::Platform::current());
+    assert_ne!(here, DisplayBridgePlatform::Unknown);
+    assert_eq!(*source_ctx.last_platform.lock().unwrap(), Some(here));
 
     // 2. Forward the source's HandshakeAck back to the sink -> it goes Streaming.
     drain_to(&source_ctx, sink);
@@ -539,6 +548,7 @@ fn pairing_code_gates_the_handshake() {
             refresh_rate: 60,
             codec: DisplayBridgeVideoCodec::Hevc,
             device_name: std::ptr::null(),
+            platform: DisplayBridgePlatform::Unknown,
         };
         assert!(unsafe { displaybridge_session_set_config(sink, &cfg) });
 
