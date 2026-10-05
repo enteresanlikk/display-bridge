@@ -1,3 +1,4 @@
+#if os(macOS)
 import CoreGraphics
 import Foundation
 
@@ -360,3 +361,4 @@ public final class ServerEngine: @unchecked Sendable {
         onStateChanged?(false)
     }
 }
+#endif

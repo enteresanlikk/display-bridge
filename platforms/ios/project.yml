@@ -1,0 +1,51 @@
+# XcodeGen spec: `make ios` turns this into DisplayBridge.xcodeproj.
+name: DisplayBridge
+options:
+  bundleIdPrefix: com.displaybridge
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  DisplayBridge:
+    path: ../apple
+targets:
+  DisplayBridge:
+    type: application
+    platform: iOS
+    sources:
+      - App
+    dependencies:
+      # The sink half of the shared Swift code (the source half is macOS-only).
+      - package: DisplayBridge
+        product: DisplayBridgeCore
+      # The Rust core, built by build-core.sh. A static library: nothing to embed.
+      - framework: build/DisplayBridgeFFI.xcframework
+        embed: false
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: DisplayBridge
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        # Finding and reaching the source both need the local-network permission.
+        NSLocalNetworkUsageDescription: DisplayBridge looks for and connects to the computer whose display it shows.
+        NSBonjourServices:
+          - _displaybridge._tcp
+        # Landscape only: the display the source creates has a fixed shape.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIRequiresFullScreen: true
+        # Without this an iPhone caps the app at 60 Hz even on a 120 Hz screen.
+        CADisableMinimumFrameDurationOnPhone: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.displaybridge.ios
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        CODE_SIGN_STYLE: Automatic

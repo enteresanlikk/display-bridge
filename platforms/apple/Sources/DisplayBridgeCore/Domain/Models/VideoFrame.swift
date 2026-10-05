@@ -1,3 +1,4 @@
+#if os(macOS)
 import CoreMedia
 @preconcurrency import IOSurface
 
@@ -20,3 +21,4 @@ public struct VideoFrame: Sendable {
         self.changedFraction = changedFraction
     }
 }
+#endif

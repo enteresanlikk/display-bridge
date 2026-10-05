@@ -1,0 +1,5 @@
+build/
+*.xcodeproj/
+Info.plist
+xcuserdata/
+.DS_Store

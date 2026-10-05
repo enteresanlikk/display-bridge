@@ -1,5 +1,6 @@
 import SwiftUI
 import Network
+import DisplayBridgeCore
 
 struct ContentView: View {
     @EnvironmentObject var serverManager: ServerManager
@@ -72,17 +73,31 @@ struct ContentView: View {
                         .tint(serverManager.isRunning ? .red : .accentColor)
                     }
 
-                    if serverManager.isRunning {
-                        HStack {
-                            Image(systemName: "lock.fill")
-                                .foregroundStyle(.green)
-                            Text("Pairing code:")
-                                .foregroundStyle(.secondary)
-                            Text(serverManager.pairingCode)
-                                .font(.body.monospaced().bold())
-                                .textSelection(.enabled)
-                            Spacer()
+                    HStack {
+                        Image(systemName: "lock.fill")
+                            .foregroundStyle(.green)
+                        Text("Pairing code:")
+                            .foregroundStyle(.secondary)
+                        TextField("at least \(PairingCode.minimumLength) characters", text: $serverManager.pairingCodeDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.body.monospaced())
+                            .frame(width: 140)
+                            .onSubmit { serverManager.applyPairingCodeDraft() }
+                        if serverManager.pairingCodeDraft != serverManager.pairingCode {
+                            Button("Save") { serverManager.applyPairingCodeDraft() }
+                                .disabled(serverManager.pairingCodeDraft.count < PairingCode.minimumLength)
                         }
+                        Spacer()
+                        Button {
+                            serverManager.regeneratePairingCode()
+                        } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Generate a new code")
+                    }
+
+                    if serverManager.isRunning {
                         ForEach(localAddresses) { addr in
                             HStack {
                                 Image(systemName: "network")

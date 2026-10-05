@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 public enum USBTransportError: Error, Sendable {
@@ -17,3 +18,4 @@ public protocol DataTransporting: Sendable {
     func receive() -> AsyncThrowingStream<Data, Error>
     func disconnect() async
 }
+#endif

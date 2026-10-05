@@ -11,6 +11,7 @@ struct CLIArguments {
     var host: String = "127.0.0.1"
     var port: UInt16 = 7878
     var pairingCode: String? = PairingCode.current()
+    var pairingDisabled = false
     var maxBitrateMbps: Int?
 
     static func parse(_ args: [String]) -> CLIArguments {
@@ -44,17 +45,21 @@ struct CLIArguments {
                     i += 1
                 }
             case "--pairing-code":
-                if i + 1 < args.count, !args[i + 1].isEmpty {
-                    result.pairingCode = args[i + 1]
-                    i += 1
+                // Saved, so later runs and the menu bar app use the same code.
+                guard i + 1 < args.count, PairingCode.set(args[i + 1]) else {
+                    print("--pairing-code needs a code of at least \(PairingCode.minimumLength) characters")
+                    exit(1)
                 }
+                i += 1
+            case "--new-pairing-code":
+                PairingCode.regenerate()
             case "--max-bitrate":
                 if i + 1 < args.count, let val = Int(args[i + 1]), val > 0 {
                     result.maxBitrateMbps = val
                     i += 1
                 }
             case "--no-pairing":
-                result.pairingCode = nil
+                result.pairingDisabled = true
             case "--help", "-h":
                 printUsage()
                 exit(0)
@@ -65,6 +70,7 @@ struct CLIArguments {
             }
             i += 1
         }
+        result.pairingCode = result.pairingDisabled ? nil : PairingCode.current()
         return result
     }
 
@@ -80,7 +86,8 @@ struct CLIArguments {
           --refresh-rate <hz>     Refresh rate (default: 120)
           --host <address>        Transport host (default: 127.0.0.1)
           --port <number>         Transport port (default: 7878)
-          --pairing-code <code>   Code network clients must enter (default: generated once and kept)
+          --pairing-code <code>   Set the code network clients must enter (saved for later runs)
+          --new-pairing-code      Replace the code with a new random one
           --no-pairing            Accept any network client without a code (trusted networks only)
           --max-bitrate <mbps>    Cap the video bitrate (default: 50 over USB, up to 500 over network)
           --help, -h              Show this help message

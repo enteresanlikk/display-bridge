@@ -1,4 +1,4 @@
-.PHONY: core mac test android android-install
+.PHONY: core mac test android android-install sink ios
 
 # Swift links core/target/release and reads a hand-synced copy of the generated C header,
 # so both must be refreshed whenever the Rust core changes. `make core` does both.
@@ -24,3 +24,12 @@ android:
 # Needs a phone connected with USB debugging on.
 android-install:
 	cd platforms/android && ./gradlew installDebug
+
+# The Linux / Windows sink (also runs on macOS). See platforms/linux and platforms/windows.
+sink:
+	cd core && cargo build --release -p displaybridge-sink
+
+# Needs Xcode and XcodeGen. Then open platforms/ios/DisplayBridge.xcodeproj.
+ios:
+	platforms/ios/build-core.sh
+	cd platforms/ios && xcodegen generate

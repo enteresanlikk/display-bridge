@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 /// Per-interval pipeline stats surfaced to the GUI/CLI. Mirrors the Rust `ClientStats`
@@ -86,11 +87,6 @@ private final class EncodeTiming: @unchecked Sendable {
             Double(bytes) * 8 / 1_000_000
         )
     }
-}
-
-public enum SessionError: Error, Sendable {
-    case invalidConfig(String)
-    case sessionCreationFailed
 }
 
 /// Bridges an `async` body into a synchronous C callback context.
@@ -416,3 +412,4 @@ private extension SessionState {
         }
     }
 }
+#endif

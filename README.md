@@ -1,11 +1,19 @@
 # DisplayBridge
 
-Turns an Android device into a second monitor for macOS. Works over USB (AOA direct) or TCP (Network / adb reverse). Targets <16ms end-to-end latency at native resolution using hardware H.265 encoding. Zero third-party dependencies.
+Turns another device into a second monitor for your Mac. Works over USB (AOA direct, Android) or the network. Targets <16ms end-to-end latency at native resolution using hardware H.265 encoding.
+
+| Platform | Shares its display (source) | Acts as a monitor (sink) | Where |
+|---|---|---|---|
+| macOS | yes | yes | `platforms/apple` |
+| Android | – | yes (USB or network, touch input) | `platforms/android` |
+| iPhone / iPad | – | yes (network, touch input) — not yet built with Xcode | `platforms/ios` |
+| Linux | – | yes (network, through `mpv`) | `platforms/linux` |
+| Windows | – | yes (network, through `mpv`) — tested under Wine only | `platforms/windows` |
 
 ## Features
 
 - **Touch, pen and mouse input** — tap, drag, two-finger scroll and two-finger tap (right click) on the tablet drive the Mac. Pen pressure and an attached mouse are passed through.
-- **Pairing code** — a network client must enter the code shown on the Mac before it gets a picture or can send input. Five wrong codes lock new attempts out for a minute. USB needs no code.
+- **Pairing code** — a network client must enter the code shown on the Mac before it gets a picture or can send input. Five wrong codes lock new attempts out for a minute. USB needs no code. The pairing code can be changed in the app's window or with `--pairing-code` / `--new-pairing-code`.
 - **Automatic discovery** — the Mac advertises itself over Bonjour; the Android app lists what it finds, so there is no IP to type.
 - **Codec fallback** — a device without a hardware HEVC decoder asks for H.264 on its own.
 - **Mac as a second monitor** — `DisplayBridgeSink` opens a window showing another Mac's extended display and sends mouse input back.
@@ -49,7 +57,8 @@ swift run DisplayBridgeSink --host <source-ip> --pairing-code <code>   # Run the
 | `--height <px>` | 1848 | Virtual display height |
 | `--refresh-rate <hz>` | 120 | Refresh rate |
 | `--port <num>` | 7878 | TCP port |
-| `--pairing-code <code>` | generated once, then kept | Code network clients must enter |
+| `--pairing-code <code>` | generated once, then kept | Set the code network clients must enter (saved) |
+| `--new-pairing-code` | – | Replace the code with a new random one |
 | `--no-pairing` | off | Accept any network client (trusted networks only) |
 | `--max-bitrate <mbps>` | 50 over USB, up to 500 over network | Cap the video bitrate; it also adapts downward on its own when the link is slow |
 
@@ -83,17 +92,20 @@ DisplayBridge/
 │       ├── displaybridge-protocol/    # wire framing, packet types, negotiation
 │       ├── displaybridge-session/     # session state machine, pacing, metrics, heartbeat
 │       ├── displaybridge-transport/   # portable TCP + USB-AOA host
-│       └── displaybridge-ffi/         # C ABI + generated header for native shells
-├── platforms/
-│   ├── apple/              # Swift package — macOS (source + sink); iOS/iPadOS (sink) later
-│   │   ├── Package.swift
-│   │   └── Sources/        # CUSBKit, DisplayBridgeCore, CLI, App, DisplayBridgeSink, CDisplayBridgeFFI
-│   └── android/            # Android client (Kotlin) — sink only
-└── docs/                   # Cross-platform architecture plan
+│       ├── displaybridge-ffi/         # C ABI + generated header for native shells
+│       └── displaybridge-sink/        # the Linux / Windows sink program
+└── platforms/
+    ├── apple/              # Swift package — macOS (source + sink), and the sink half of the iOS app
+    │   ├── Package.swift
+    │   └── Sources/        # CUSBKit, DisplayBridgeCore, CLI, App, DisplayBridgeSink, CDisplayBridgeFFI
+    ├── android/            # Android client (Kotlin) — sink only
+    ├── ios/                # iPhone / iPad app (Swift) — sink only, reuses the Apple package
+    ├── linux/              # how to build and run the Rust sink on Linux
+    └── windows/            # how to build and run the Rust sink on Windows
 ```
 
 > **Roles.** A *source* extends/shares its display; a *sink* becomes a second monitor.
-> macOS runs both; mobile is sink-only. See `docs/CROSS_PLATFORM_PLAN.md`.
+> macOS runs both; every other platform is sink-only for now.
 
 ## Pipeline
 

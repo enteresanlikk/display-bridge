@@ -1,3 +1,4 @@
+#if os(macOS)
 import CUSBKit
 import Foundation
 
@@ -293,3 +294,4 @@ public final class AOATransport: @unchecked Sendable, DataTransporting {
         CUSBDeviceClose(device)
     }
 }
+#endif

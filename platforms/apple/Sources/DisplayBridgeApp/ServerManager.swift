@@ -9,7 +9,31 @@ final class ServerManager: ObservableObject {
     @Published var port: UInt16 = 7878
     @Published var errorMessage: String?
     /// Shown in the window so the user can type it into the client.
-    let pairingCode = PairingCode.current()
+    @Published private(set) var pairingCode = PairingCode.current()
+    /// What the user is typing into the pairing-code field.
+    @Published var pairingCodeDraft = PairingCode.current()
+
+    /// Saves the typed code. It applies to connections made from now on; clients that
+    /// are already streaming stay connected. Returns false if the code is too short.
+    @discardableResult
+    func applyPairingCodeDraft() -> Bool {
+        guard PairingCode.set(pairingCodeDraft) else {
+            pairingCodeDraft = pairingCode
+            return false
+        }
+        usePairingCode(PairingCode.current())
+        return true
+    }
+
+    func regeneratePairingCode() {
+        usePairingCode(PairingCode.regenerate())
+    }
+
+    private func usePairingCode(_ code: String) {
+        pairingCode = code
+        pairingCodeDraft = code
+        engine?.pairingCode = code
+    }
 
     private var engine: ServerEngine?
 

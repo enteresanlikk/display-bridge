@@ -1,3 +1,4 @@
+#if os(macOS)
 public protocol VideoEncoding: Sendable {
     func setup(config: DeviceConfig) throws
     /// Synchronous encode — blocks calling thread until HW encoder finishes (~1ms).
@@ -14,3 +15,4 @@ public protocol VideoEncoding: Sendable {
 public extension VideoEncoding {
     func scaleBitrate(by factor: Double) -> Int { 0 }
 }
+#endif

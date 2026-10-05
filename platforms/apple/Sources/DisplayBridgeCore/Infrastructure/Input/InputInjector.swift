@@ -1,3 +1,4 @@
+#if os(macOS)
 import CoreGraphics
 import Foundation
 
@@ -93,3 +94,4 @@ public final class InputInjector: @unchecked Sendable {
         e.post(tap: .cghidEventTap)
     }
 }
+#endif

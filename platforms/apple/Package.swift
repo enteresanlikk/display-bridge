@@ -53,7 +53,9 @@ let package = Package(
     // mode is pinned to v5 (see swiftLanguageModes below) so the existing targets
     // keep compiling unchanged (6.0 would otherwise default to the stricter Swift 6
     // language mode).
-    platforms: [.macOS(.v13)],
+    // iOS builds only DisplayBridgeCore, and of it only the sink side (the source-side
+    // files are wrapped in `#if os(macOS)`); see platforms/ios.
+    platforms: [.macOS(.v13), .iOS(.v16)],
     products: [
         .library(name: "DisplayBridgeCore", targets: ["DisplayBridgeCore"]),
         .executable(name: "DisplayBridgeCLI", targets: ["DisplayBridgeCLI"]),
@@ -76,9 +78,14 @@ let package = Package(
         ),
         .target(
             name: "DisplayBridgeCore",
-            dependencies: ["CUSBKit", "CDisplayBridgeFFI"],
+            dependencies: [
+                .target(name: "CUSBKit", condition: .when(platforms: [.macOS])),
+                "CDisplayBridgeFFI",
+            ],
             linkerSettings: [
-                .unsafeFlags(rustCoreLinkerFlags)
+                // macOS links the Rust core from core/target; the iOS app links it from the
+                // xcframework that platforms/ios/build-core.sh assembles.
+                .unsafeFlags(rustCoreLinkerFlags, .when(platforms: [.macOS]))
             ]
         ),
         .executableTarget(

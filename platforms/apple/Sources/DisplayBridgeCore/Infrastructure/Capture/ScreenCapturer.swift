@@ -1,3 +1,4 @@
+#if os(macOS)
 import CoreMedia
 import Foundation
 import IOSurface
@@ -172,3 +173,4 @@ public final class ScreenCapturer: NSObject, DisplayCapturing, SCStreamOutput, @
         handler(frame)
     }
 }
+#endif

@@ -17,8 +17,31 @@ func argValue(_ name: String) -> String? {
     return args[i + 1]
 }
 
-let host = argValue("--host") ?? "127.0.0.1"
-let port = UInt16(argValue("--port") ?? "7878") ?? 7878
+/// Looks for a source on the local network for a few seconds; the first one found wins.
+func discoverSource() -> DiscoveredSource? {
+    var found: DiscoveredSource?
+    let browser = SourceBrowser { sources in found = found ?? sources.first }
+    browser.start()
+    let deadline = Date().addingTimeInterval(5)
+    while found == nil && Date() < deadline {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    }
+    browser.stop()
+    return found
+}
+
+var host = argValue("--host") ?? ""
+var port = UInt16(argValue("--port") ?? "7878") ?? 7878
+if host.isEmpty {
+    print("[DisplayBridgeSink] No --host given, looking for a source on this network...")
+    guard let source = discoverSource() else {
+        print("[DisplayBridgeSink] Found none. Start a source, or pass --host <address>.")
+        exit(1)
+    }
+    print("[DisplayBridgeSink] Found \(source.name) at \(source.host):\(source.port)")
+    host = source.host
+    port = source.port
+}
 let width = Int(argValue("--width") ?? "1280") ?? 1280
 let height = Int(argValue("--height") ?? "720") ?? 720
 let refresh = Int(argValue("--refresh") ?? "60") ?? 60

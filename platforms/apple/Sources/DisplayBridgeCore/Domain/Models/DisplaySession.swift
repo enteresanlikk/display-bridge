@@ -27,3 +27,8 @@ public struct DisplaySession: Sendable {
         self.config = newConfig
     }
 }
+
+public enum SessionError: Error, Sendable {
+    case invalidConfig(String)
+    case sessionCreationFailed
+}

@@ -1,0 +1,10 @@
+[package]
+name = "displaybridge-sink"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "DisplayBridge sink for Linux and Windows: receives a source's display and shows it through mpv or ffplay."
+
+[dependencies]
+displaybridge-ffi = { path = "../displaybridge-ffi" }

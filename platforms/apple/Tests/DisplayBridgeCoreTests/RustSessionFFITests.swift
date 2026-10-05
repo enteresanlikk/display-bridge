@@ -179,3 +179,50 @@ func frameSizeGovernorReactsPerFrame() {
     #expect(g.motionQP == raised - 1)
     #expect(g.floor(changedFraction: 0.02) == FrameSizeGovernor.detailQP)
 }
+
+/// Touch gestures, as a sink's screen reports them, become the right pointer events.
+@Test
+func touchGesturesBecomePointerEvents() {
+    let size = CGSize(width: 1000, height: 500)
+    func kinds(_ events: [InputEvent]) -> [InputEvent.Kind] { events.map(\.kind) }
+
+    // Tap: nothing is pressed until the finger lifts, then a click where it landed.
+    var t = TouchGestureTranslator()
+    #expect(kinds(t.handle(.began, points: [CGPoint(x: 250, y: 250)], remaining: 1, in: size)) == [.hover])
+    #expect(t.handle(.moved, points: [CGPoint(x: 252, y: 251)], remaining: 1, in: size).isEmpty)
+    let tap = t.handle(.ended, points: [CGPoint(x: 252, y: 251)], remaining: 0, in: size)
+    #expect(kinds(tap) == [.down, .up])
+    #expect(tap[0].x == 0.25 && tap[0].y == 0.5 && tap[0].button == 0)
+
+    // Drag: the press starts where the finger landed, once it has clearly moved.
+    t = TouchGestureTranslator()
+    _ = t.handle(.began, points: [CGPoint(x: 100, y: 100)], remaining: 1, in: size)
+    let start = t.handle(.moved, points: [CGPoint(x: 200, y: 100)], remaining: 1, in: size)
+    #expect(kinds(start) == [.down, .move])
+    #expect(start[0].x == 0.1 && start[1].x == 0.2)
+    #expect(kinds(t.handle(.moved, points: [CGPoint(x: 300, y: 100)], remaining: 1, in: size)) == [.move])
+    #expect(kinds(t.handle(.ended, points: [CGPoint(x: 300, y: 100)], remaining: 0, in: size)) == [.up])
+
+    // Two fingers scroll and never click.
+    t = TouchGestureTranslator()
+    _ = t.handle(.began, points: [CGPoint(x: 400, y: 200)], remaining: 1, in: size)
+    #expect(t.handle(.began, points: [CGPoint(x: 600, y: 200), CGPoint(x: 400, y: 200)], remaining: 2, in: size).isEmpty)
+    let scroll = t.handle(.moved, points: [CGPoint(x: 600, y: 300), CGPoint(x: 400, y: 300)], remaining: 2, in: size)
+    #expect(kinds(scroll) == [.scroll])
+    #expect(scroll[0].dy == 0.2 && scroll[0].dx == 0 && scroll[0].x == 0.4)
+    #expect(t.handle(.ended, points: [CGPoint(x: 600, y: 300)], remaining: 1, in: size).isEmpty)
+    #expect(t.handle(.ended, points: [CGPoint(x: 400, y: 300)], remaining: 0, in: size).isEmpty)
+
+    // Two fingers down and up in place: a secondary click.
+    t = TouchGestureTranslator()
+    _ = t.handle(.began, points: [CGPoint(x: 400, y: 200)], remaining: 1, in: size)
+    _ = t.handle(.began, points: [CGPoint(x: 600, y: 200), CGPoint(x: 400, y: 200)], remaining: 2, in: size)
+    let secondary = t.handle(.ended, points: [CGPoint(x: 600, y: 200), CGPoint(x: 400, y: 200)], remaining: 0, in: size)
+    #expect(kinds(secondary) == [.down, .up])
+    #expect(secondary.allSatisfy { $0.button == 1 })
+
+    // A pen presses at once and carries its pressure.
+    t = TouchGestureTranslator()
+    let pen = t.handle(.began, points: [CGPoint(x: 500, y: 250)], remaining: 1, in: size, precise: true, pressure: 0.4)
+    #expect(kinds(pen) == [.down] && pen[0].pressure == 0.4)
+}

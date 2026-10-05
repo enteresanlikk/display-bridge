@@ -1,3 +1,4 @@
+#if os(macOS)
 import CUSBKit
 import CoreFoundation
 import Foundation
@@ -500,3 +501,4 @@ public final class AOAManager: @unchecked Sendable {
         stop()
     }
 }
+#endif

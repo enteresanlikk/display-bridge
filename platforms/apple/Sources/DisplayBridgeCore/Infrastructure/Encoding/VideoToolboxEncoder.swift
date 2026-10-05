@@ -1,3 +1,4 @@
+#if os(macOS)
 import CoreMedia
 import Foundation
 import IOSurface
@@ -449,3 +450,4 @@ public final class VideoToolboxEncoder: @unchecked Sendable, VideoEncoding {
         teardownSession()
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Network
 
@@ -5,7 +6,7 @@ import Network
 /// via an `AsyncStream`. Used by main.swift to orchestrate multiple clients.
 public final class ConnectionListener: @unchecked Sendable {
     /// Bonjour service type; must match SERVICE_TYPE in the Android ConnectionActivity.
-    public static let serviceType = "_displaybridge._tcp"
+    public static let serviceType = SourceBrowser.serviceType
 
     private var listener: NWListener?
     private let port: UInt16
@@ -104,3 +105,4 @@ public final class ConnectionListener: @unchecked Sendable {
         lstn?.cancel()
     }
 }
+#endif

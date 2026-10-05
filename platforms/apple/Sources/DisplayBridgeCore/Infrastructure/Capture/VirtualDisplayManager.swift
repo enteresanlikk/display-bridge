@@ -1,3 +1,4 @@
+#if os(macOS)
 import CoreGraphics
 import Foundation
 import ObjectiveC
@@ -239,3 +240,4 @@ public final class VirtualDisplayManager: @unchecked Sendable {
         return mainDisplay
     }
 }
+#endif

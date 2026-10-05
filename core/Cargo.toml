@@ -5,6 +5,7 @@ members = [
     "crates/displaybridge-session",
     "crates/displaybridge-transport",
     "crates/displaybridge-ffi",
+    "crates/displaybridge-sink",
 ]
 
 [workspace.package]
