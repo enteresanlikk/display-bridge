@@ -2,12 +2,23 @@
 
 Turns an Android device into a second monitor for macOS. Works over USB (AOA direct) or TCP (Network / adb reverse). Targets <16ms end-to-end latency at native resolution using hardware H.265 encoding. Zero third-party dependencies.
 
+## Features
+
+- **Touch, pen and mouse input** — tap, drag, two-finger scroll and two-finger tap (right click) on the tablet drive the Mac. Pen pressure and an attached mouse are passed through.
+- **Pairing code** — a network client must enter the code shown on the Mac before it gets a picture or can send input. Five wrong codes lock new attempts out for a minute. USB needs no code.
+- **Automatic discovery** — the Mac advertises itself over Bonjour; the Android app lists what it finds, so there is no IP to type.
+- **Codec fallback** — a device without a hardware HEVC decoder asks for H.264 on its own.
+- **Mac as a second monitor** — `DisplayBridgeSink` opens a window showing another Mac's extended display and sends mouse input back.
+
+> The stream itself is not encrypted, and the pairing code travels in the clear: it keeps other devices on your network out, not someone who can already read your traffic. On a network you don't trust, use USB.
+
 ## Requirements
 
 ### macOS Server
 - macOS 14+ (CGVirtualDisplay, ScreenCaptureKit)
 - Swift 5.9+
 - Screen Recording permission (System Settings > Privacy > Screen Recording)
+- Accessibility permission (System Settings > Privacy & Security > Accessibility) for touch input; without it the picture works but taps do nothing
 
 ### Android Client
 - Android 5.0+
@@ -18,12 +29,17 @@ Turns an Android device into a second monitor for macOS. Works over USB (AOA dir
 ### 1. Server (macOS)
 
 ```bash
-cd servers/macos
-swift build                    # Debug build
-swift build -c release         # Release build
-swift run DisplayBridgeCLI     # Start in CLI mode
+make mac                       # Build the Rust core, then the CLI and the sink
+make test                      # Rust tests + the headless end-to-end proofs
+
+cd platforms/apple
+swift run DisplayBridgeCLI     # Start in CLI mode (source); prints the pairing code
 swift run DisplayBridgeApp     # Start as menu bar app
+swift run DisplayBridgeSink --host <source-ip> --pairing-code <code>   # Run the Mac as a second monitor (sink)
 ```
+
+> The Swift package links the shared Rust core (`core/`). `make core` rebuilds it and
+> refreshes the C header the Swift side reads; run it after any change under `core/`.
 
 #### CLI Options
 
@@ -33,6 +49,9 @@ swift run DisplayBridgeApp     # Start as menu bar app
 | `--height <px>` | 1848 | Virtual display height |
 | `--refresh-rate <hz>` | 120 | Refresh rate |
 | `--port <num>` | 7878 | TCP port |
+| `--pairing-code <code>` | generated once, then kept | Code network clients must enter |
+| `--no-pairing` | off | Accept any network client (trusted networks only) |
+| `--max-bitrate <mbps>` | 50 over USB, up to 500 over network | Cap the video bitrate; it also adapts downward on its own when the link is slow |
 
 ```bash
 # Example: 1920x1080 @60Hz on port 8080
@@ -51,7 +70,7 @@ adb reverse tcp:7878 tcp:7878
 Then open the Android client app and connect to `127.0.0.1:7878`. This method is primarily for development/debugging — use USB AOA for production.
 
 #### Network
-Enter your Mac's IP address and port in the Android client app.
+Open the Android client app: Macs running DisplayBridge on the same network appear in the list — tap one, enter the pairing code shown on the Mac, and connect. You can still type an IP address and port by hand.
 
 Both TCP and USB AOA transports run simultaneously — multiple clients can connect via different methods at the same time.
 
@@ -59,17 +78,22 @@ Both TCP and USB AOA transports run simultaneously — multiple clients can conn
 
 ```
 DisplayBridge/
-├── servers/
-│   └── macos/              # macOS server (Swift, SPM)
-│       ├── Package.swift
-│       └── Sources/
-│           ├── CUSBKit/           # IOKit USB C bridge
-│           ├── DisplayBridgeCore/ # Core library (Clean Architecture)
-│           ├── DisplayBridgeCLI/  # CLI app
-│           └── DisplayBridgeApp/  # SwiftUI menu bar app
-└── clients/
-    └── android/            # Android client (Kotlin)
+├── core/                   # Shared Rust core (single source of truth), FFI to every platform
+│   └── crates/
+│       ├── displaybridge-protocol/    # wire framing, packet types, negotiation
+│       ├── displaybridge-session/     # session state machine, pacing, metrics, heartbeat
+│       ├── displaybridge-transport/   # portable TCP + USB-AOA host
+│       └── displaybridge-ffi/         # C ABI + generated header for native shells
+├── platforms/
+│   ├── apple/              # Swift package — macOS (source + sink); iOS/iPadOS (sink) later
+│   │   ├── Package.swift
+│   │   └── Sources/        # CUSBKit, DisplayBridgeCore, CLI, App, DisplayBridgeSink, CDisplayBridgeFFI
+│   └── android/            # Android client (Kotlin) — sink only
+└── docs/                   # Cross-platform architecture plan
 ```
+
+> **Roles.** A *source* extends/shares its display; a *sink* becomes a second monitor.
+> macOS runs both; mobile is sink-only. See `docs/CROSS_PLATFORM_PLAN.md`.
 
 ## Pipeline
 

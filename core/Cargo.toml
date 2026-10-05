@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/displaybridge-protocol",
+    "crates/displaybridge-session",
+    "crates/displaybridge-transport",
+    "crates/displaybridge-ffi",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/enteresanlikk/display-bridge"
+
+[workspace.dependencies]
+displaybridge-protocol = { path = "crates/displaybridge-protocol" }
+displaybridge-session = { path = "crates/displaybridge-session" }
+displaybridge-transport = { path = "crates/displaybridge-transport" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+log = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

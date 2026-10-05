@@ -1,0 +1,12 @@
+[package]
+name = "displaybridge-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "DisplayBridge wire protocol: framing, packet types, and negotiation structs (single source of truth)."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,12 @@
+[package]
+name = "displaybridge-session"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "DisplayBridge session state machine, frame pacing, metrics, and heartbeat."
+
+[dependencies]
+displaybridge-protocol = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }

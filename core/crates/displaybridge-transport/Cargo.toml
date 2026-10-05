@@ -1,0 +1,19 @@
+[package]
+name = "displaybridge-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "DisplayBridge transports: portable TCP and USB-AOA host (rusb)."
+
+[dependencies]
+displaybridge-protocol = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+rusb = { version = "0.9", optional = true }
+
+[features]
+# The USB AOA host transport pulls in `rusb`, which links against a system/vendored
+# libusb. Gating it keeps the default build free of that dependency so the crate
+# compiles anywhere. Build with `--features usb` on machines that have libusb.
+usb = ["dep:rusb"]

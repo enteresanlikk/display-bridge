@@ -1,0 +1,119 @@
+import Foundation
+import Network
+
+/// Wraps a single accepted NWConnection and implements `DataTransporting`.
+/// Created by `ConnectionListener` for each incoming client.
+public final class ClientConnection: @unchecked Sendable, DataTransporting {
+    private let connection: NWConnection
+    private let queue: DispatchQueue
+    private let lock = NSLock()
+    private var receiveContinuation: AsyncThrowingStream<Data, Error>.Continuation?
+
+    /// Unique identifier for this client session.
+    public let clientID: UUID
+
+    init(connection: NWConnection, clientID: UUID = UUID()) {
+        self.connection = connection
+        self.clientID = clientID
+        self.queue = DispatchQueue(label: "com.displaybridge.client.\(clientID.uuidString.prefix(8))", qos: .userInteractive)
+    }
+
+    /// No-op — the connection is already established when handed to us by the listener.
+    public func connect() async throws {
+        // Connection is already in .ready state from ConnectionListener.
+    }
+
+    public func send(_ data: Data) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            connection.send(content: data, completion: .contentProcessed { error in
+                if let error = error {
+                    continuation.resume(throwing: USBTransportError.sendFailed(error.localizedDescription))
+                } else {
+                    continuation.resume()
+                }
+            })
+        }
+    }
+
+    public func sendTracked(_ data: Data, onComplete: @escaping @Sendable () -> Void) {
+        connection.send(content: data, completion: .contentProcessed { [weak self] error in
+            onComplete()
+            if let error = error {
+                print("[ClientConnection] Send error, closing stream: \(error)")
+                self?.lock.lock()
+                self?.receiveContinuation?.finish(throwing: error)
+                self?.receiveContinuation = nil
+                self?.lock.unlock()
+            }
+        })
+    }
+
+    public func receive() -> AsyncThrowingStream<Data, Error> {
+        return AsyncThrowingStream { continuation in
+            self.lock.lock()
+            self.receiveContinuation = continuation
+            self.lock.unlock()
+
+            continuation.onTermination = { @Sendable _ in }
+
+            // Monitor connection state to detect peer disconnect
+            self.connection.stateUpdateHandler = { [weak self] state in
+                switch state {
+                case .failed(let error):
+                    print("[ClientConnection] Connection failed: \(error)")
+                    self?.lock.lock()
+                    self?.receiveContinuation?.finish(throwing: error)
+                    self?.receiveContinuation = nil
+                    self?.lock.unlock()
+                case .cancelled:
+                    print("[ClientConnection] Connection cancelled")
+                    self?.lock.lock()
+                    self?.receiveContinuation?.finish()
+                    self?.receiveContinuation = nil
+                    self?.lock.unlock()
+                default:
+                    break
+                }
+            }
+
+            self.receiveLoop(continuation: continuation)
+        }
+    }
+
+    /// Streams raw byte chunks straight through — framing is owned by the Rust core, which
+    /// reassembles complete packets from these opaque bytes via `feed`.
+    private func receiveLoop(
+        continuation: AsyncThrowingStream<Data, Error>.Continuation
+    ) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] content, _, isComplete, error in
+            if let error = error {
+                continuation.finish(throwing: error)
+                return
+            }
+
+            if let data = content, !data.isEmpty {
+                continuation.yield(data)
+            }
+
+            if isComplete {
+                continuation.finish()
+                return
+            }
+
+            self?.receiveLoop(continuation: continuation)
+        }
+    }
+
+    public func disconnect() async {
+        lock.withLock {
+            receiveContinuation?.finish()
+            receiveContinuation = nil
+        }
+
+        connection.cancel()
+    }
+
+    deinit {
+        connection.cancel()
+    }
+}

@@ -1,0 +1,19 @@
+[package]
+name = "displaybridge-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "DisplayBridge FFI surface: hand-written C ABI session driver for native shells."
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+displaybridge-protocol = { workspace = true }
+displaybridge-session = { workspace = true }
+displaybridge-transport = { workspace = true }
+log = { workspace = true }
+
+[build-dependencies]
+cbindgen = "0.27"
